@@ -1,71 +1,65 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useCompany } from "@/lib/company-context";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
-import { byFirm, dispatches, mt } from "@/lib/erp-data";
-import { Badge, Kpi, PageHeader, Panel, Table, Td } from "@/components/erp/ui-bits";
-import { VehicleEditor } from "@/components/erp/VehicleBoard";
+import { SLOTS, VehicleEditor, todayIso } from "@/components/erp/VehicleBoard";
+import type { Stop } from "@/components/erp/LogisticsDashboard";
 
 export const Route = createFileRoute("/dispatch")({
   head: () => ({
-    meta: [
-      { title: "Dispatch · Avighna ERP" },
-      { name: "description", content: "Loads moving from pending to delivered, with vehicle, transporter, LR number and proof of delivery." },
-      { property: "og:title", content: "Dispatch · Avighna ERP" },
-      { property: "og:description", content: "Track every load from allocation to delivery." },
-    ],
+    meta: [{ title: "Runs · Avighna" }],
   }),
   component: Dispatch,
 });
 
-const stages = ["Pending", "Allocated", "Packed", "Ready", "Dispatched", "Delivered"] as const;
-
 function Dispatch() {
-  const { firm } = useCompany();
   const { me } = useMe();
-  const rows = byFirm(dispatches, firm);
-  const canMarkVehicles = ["supervisor", "logistics", "owner", "super_admin"].includes(me?.user.role || "");
+  if (me?.user.role === "logistics") return <DriverRuns />;
+  return (
+    <div className="mx-auto max-w-md space-y-4">
+      <h1 className="font-[Fraunces,Georgia,serif] text-2xl">Truck windows</h1>
+      <VehicleEditor />
+    </div>
+  );
+}
+
+function DriverRuns() {
+  const [onDate, setOnDate] = useState(todayIso);
+  const [stops, setStops] = useState<Stop[]>([]);
+
+  useEffect(() => {
+    api<Stop[]>(`/api/v1/deliveries?on_date=${onDate}`)
+      .then(setStops)
+      .catch(() => setStops([]));
+  }, [onDate]);
 
   return (
-    <>
-      <PageHeader title="Dispatch" subtitle="A single line of sight from allocation to delivery, so nobody has to call the warehouse." />
-      {canMarkVehicles && (
-        <div className="mb-6">
-          <VehicleEditor />
-        </div>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <Kpi label="Moving today" value={String(rows.filter((d) => d.status === "Dispatched").length)} />
-        <Kpi label="Awaiting vehicle" value={String(rows.filter((d) => ["Pending", "Allocated", "Packed", "Ready"].includes(d.status)).length)} tone="warn" />
-        <Kpi label="Delivered this week" value={String(rows.filter((d) => d.status === "Delivered").length)} tone="good" />
+    <div className="space-y-5">
+      <div>
+        <h1 className="font-[Fraunces,Georgia,serif] text-2xl">Runs</h1>
+        <p className="mt-1 text-sm text-muted-foreground">Pick a day. Three windows. Tap a window to book or free it.</p>
       </div>
-
-      <div className="mt-6 grid gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {stages.map((s) => (
-          <div key={s} className="rounded-2xl border border-border bg-card p-4">
-            <p className="text-xs uppercase tracking-[0.12em] text-muted-foreground">{s}</p>
-            <p className="mt-2 text-xl font-semibold tabular-nums">{rows.filter((d) => d.status === s).length}</p>
-          </div>
-        ))}
-      </div>
-
-      <Panel title="Loads" className="mt-6">
-        <Table head={["Load", "Customer", "Product", "Qty", "Vehicle", "Transporter", "LR no.", "ETA", "Status"]}>
-          {rows.map((d) => (
-            <tr key={d.id}>
-              <Td className="font-medium">{d.id}</Td>
-              <Td>{d.customer}</Td>
-              <Td className="text-muted-foreground">{d.product}</Td>
-              <Td className="tabular-nums">{mt(d.qty)}</Td>
-              <Td className="tabular-nums">{d.vehicle}</Td>
-              <Td className="text-muted-foreground">{d.transporter}</Td>
-              <Td className="text-muted-foreground">{d.lr}</Td>
-              <Td>{d.eta}</Td>
-              <Td><Badge tone={d.status === "Delivered" ? "good" : d.status === "Pending" ? "warn" : "neutral"}>{d.status}</Badge></Td>
-            </tr>
-          ))}
-        </Table>
-      </Panel>
-    </>
+      <VehicleEditor date={onDate} onDateChange={setOnDate} />
+      <ul className="space-y-2">
+        {SLOTS.map((s) => {
+          const rows = stops.filter((x) => x.slot === s.key);
+          return (
+            <li key={s.key} className="rounded-2xl border border-border bg-card p-3">
+              <p className="text-xs uppercase tracking-wide text-muted-foreground">{s.label}</p>
+              {rows.length ? (
+                rows.map((r) => (
+                  <p key={r.id} className="mt-1 text-sm font-medium">
+                    {r.customer_name}
+                    <span className="font-normal text-muted-foreground"> · {r.item_summary}</span>
+                  </p>
+                ))
+              ) : (
+                <p className="mt-1 text-sm text-muted-foreground">No stop</p>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
   );
 }

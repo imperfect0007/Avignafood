@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -11,6 +11,7 @@ from app.core.database import get_db
 from app.core.deps import AuthContext, require_perms
 from app.core.models import (
     Customer,
+    Delivery,
     FieldVisit,
     FieldVisitMedia,
     Lead,
@@ -18,6 +19,8 @@ from app.core.models import (
     RoleName,
     SalesOrder,
     SalesOrderStatus,
+    Vehicle,
+    VehicleSlot,
 )
 from app.core.schemas import VisitCreate, VisitOut
 from app.inventory.routes import _default_warehouse
@@ -130,6 +133,49 @@ def create_visit(
         db.add(so)
         db.flush()
         sales_order_id = so.id
+        truck = (
+            db.query(Vehicle)
+            .filter(Vehicle.organization_id == auth.organization_id, Vehicle.is_active.is_(True))
+            .order_by(Vehicle.id)
+            .first()
+        )
+        slot = "morning"
+        if truck:
+            taken = {
+                r.slot
+                for r in db.query(VehicleSlot).filter(
+                    VehicleSlot.vehicle_id == truck.id,
+                    VehicleSlot.on_date == date.today(),
+                    VehicleSlot.status == "booked",
+                ).all()
+            }
+            for name in ("morning", "afternoon", "evening"):
+                if name not in taken:
+                    slot = name
+                    break
+            else:
+                slot = "evening"
+            row = (
+                db.query(VehicleSlot)
+                .filter(VehicleSlot.vehicle_id == truck.id, VehicleSlot.on_date == date.today(), VehicleSlot.slot == slot)
+                .first()
+            )
+            if row:
+                row.status = "booked"
+            else:
+                db.add(VehicleSlot(vehicle_id=truck.id, on_date=date.today(), slot=slot, status="booked"))
+        db.add(
+            Delivery(
+                organization_id=auth.organization_id,
+                company_id=body.company_id,
+                customer_id=customer.id,
+                vehicle_id=truck.id if truck else None,
+                item_summary="Order from field visit",
+                slot_date=date.today(),
+                slot=slot,
+                status="pending",
+            )
+        )
     else:
         if not site_name:
             raise HTTPException(status_code=400, detail="Business / site name is required")

@@ -18,6 +18,7 @@ from app.products.routes import router as products_router
 from app.quotations.routes import router as quotations_router
 from app.sales.routes import router as sales_router
 from app.users.routes import router as users_router
+from app.deliveries.routes import router as deliveries_router
 from app.vehicles.routes import router as vehicles_router
 from app.visits.routes import router as visits_router
 
@@ -47,6 +48,7 @@ for r in (
     audit_router,
     visits_router,
     vehicles_router,
+    deliveries_router,
 ):
     app.include_router(r, prefix="/api/v1")
 

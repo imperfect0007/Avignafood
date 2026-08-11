@@ -153,15 +153,11 @@ const navByRole: Record<string, NavSection[]> = {
     },
   ],
   logistics: [
-    { group: "Overview", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
     {
-      group: "Dispatch",
+      group: "Drive",
       items: [
-        { to: "/dispatch", label: "Dispatch", icon: Truck },
-        { to: "/sales", label: "Sales & approvals", icon: Handshake },
-        { to: "/customers", label: "Customers", icon: Users },
-        { to: "/invoices", label: "Invoices", icon: ReceiptText },
-        { to: "/analytics", label: "Analytics", icon: BarChart3 },
+        { to: "/", label: "Today", icon: LayoutDashboard },
+        { to: "/dispatch", label: "Runs", icon: Truck },
       ],
     },
   ],
@@ -296,13 +292,13 @@ export function AppShell({ children }: { children: ReactNode }) {
     return <div className="min-h-dvh bg-background" />;
   }
 
-  if (role === "sales") {
+  if (role === "sales" || role === "logistics") {
     return (
       <div className="min-h-dvh bg-background">
         <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
           <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-semibold">{me?.user.full_name || "Sales"}</p>
-            <p className="text-xs text-muted-foreground">On-site · phone</p>
+            <p className="truncate text-base font-semibold">{me?.user.full_name || (role === "logistics" ? "Driver" : "Sales")}</p>
+            <p className="text-xs text-muted-foreground">{role === "logistics" ? "Driver · phone" : "On-site · phone"}</p>
           </div>
           <button
             type="button"
@@ -318,7 +314,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <main className="mx-auto max-w-md px-4 py-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))]">
           {children}
         </main>
-        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-2 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
           {flattenNav(activeNav).map((item) => {
             const active = pathname === item.to;
             return (

@@ -423,23 +423,63 @@ class VehicleOut(ORMModel):
     plate: str
     kind: str
     driver_name: str | None = None
+    live_status: str = "idle"
     is_active: bool
 
 
-class VehicleDayOut(BaseModel):
+class VehicleAvailOut(BaseModel):
     vehicle_id: int
     name: str
     plate: str
     kind: str
     driver_name: str | None = None
-    status: str  # available | booked | unmarked
-    notes: str | None = None
+    live_status: str
+    morning: str
+    afternoon: str
+    evening: str
 
 
-class VehicleDaySet(BaseModel):
+class VehicleLiveSet(BaseModel):
+    status: str  # idle | going | returning
+
+
+class VehicleSlotSet(BaseModel):
     on_date: date
-    status: str
+    slot: str  # morning | afternoon | evening
+    status: str  # free | booked
     notes: str | None = None
+
+
+class DeliveryOut(ORMModel):
+    id: int
+    company_id: int
+    company_name: str
+    customer_name: str
+    address: str | None
+    phone: str | None
+    item_summary: str
+    slot_date: date
+    slot: str
+    status: str
+    pod_url: str | None = None
+
+
+class DeliveryComplete(BaseModel):
+    pod_url: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+
+
+class DeliveryInvoiceOut(BaseModel):
+    delivery_id: int
+    number: str
+    company_name: str
+    customer_name: str
+    address: str | None
+    phone: str | None
+    item_summary: str
+    slot_date: date
+    slot: str
 
 
 class VehicleCreate(BaseModel):

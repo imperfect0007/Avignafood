@@ -439,6 +439,7 @@ class Vehicle(Base):
     plate: Mapped[str] = mapped_column(String(40), nullable=False)
     kind: Mapped[str] = mapped_column(String(40), default="truck")
     driver_name: Mapped[str | None] = mapped_column(String(120))
+    live_status: Mapped[str] = mapped_column(String(20), default="idle")  # idle | going | returning
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -452,3 +453,36 @@ class VehicleDay(Base):
     on_date: Mapped[date] = mapped_column(Date, nullable=False)
     status: Mapped[str] = mapped_column(String(20), nullable=False)  # available | booked
     notes: Mapped[str | None] = mapped_column(String(200))
+
+
+class VehicleSlot(Base):
+    """Own truck has two windows a day. hired = extra rented vehicle for that window."""
+
+    __tablename__ = "vehicle_slots"
+    __table_args__ = (UniqueConstraint("vehicle_id", "on_date", "slot"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), nullable=False)
+    on_date: Mapped[date] = mapped_column(Date, nullable=False)
+    slot: Mapped[str] = mapped_column(String(20), nullable=False)  # morning | afternoon | evening
+    status: Mapped[str] = mapped_column(String(20), nullable=False, default="free")  # free | booked
+    notes: Mapped[str | None] = mapped_column(String(200))
+
+
+class Delivery(Base):
+    __tablename__ = "deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"))
+    item_summary: Mapped[str] = mapped_column(String(200), nullable=False)
+    slot_date: Mapped[date] = mapped_column(Date, nullable=False)
+    slot: Mapped[str] = mapped_column(String(20), default="morning")
+    status: Mapped[str] = mapped_column(String(20), default="pending")  # pending | done
+    pod_url: Mapped[str | None] = mapped_column(String(255))
+    lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

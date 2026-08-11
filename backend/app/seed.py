@@ -52,6 +52,8 @@ PERMISSIONS = [
     ("visits.create", "Log field visits"),
     ("vehicles.view", "View vehicle availability"),
     ("vehicles.edit", "Set vehicle availability"),
+    ("deliveries.view", "View delivery stops"),
+    ("deliveries.edit", "Complete deliveries"),
 ]
 
 # Granular VIEW/CREATE/EDIT/APPROVE — menus hide modules; APIs enforce these codes.
@@ -86,6 +88,8 @@ ROLE_PERMS: dict[RoleName, list[str] | str] = {
         "visits.create",
         "vehicles.view",
         "vehicles.edit",
+        "deliveries.view",
+        "deliveries.edit",
     ],
     RoleName.SALES: [
         "dashboard.view",
@@ -117,15 +121,13 @@ ROLE_PERMS: dict[RoleName, list[str] | str] = {
         "audit.view",
     ],
     RoleName.LOGISTICS: [
-        # dispatch + addresses + order/invoice view; no inventory, leads, receivables write
         "dashboard.view",
         "companies.view",
         "customers.view",
-        "products.view",
-        "sales.view",
-        "invoices.view",
         "vehicles.view",
         "vehicles.edit",
+        "deliveries.view",
+        "deliveries.edit",
     ],
     # ponytail: WAREHOUSE role removed — Supervisor owns warehouse; enum kept for old DB rows
 }
@@ -181,6 +183,7 @@ def _ensure_logo_column() -> None:
     _ensure_column("field_visits", "customer_id", "ALTER TABLE field_visits ADD COLUMN customer_id INTEGER")
     _ensure_column("field_visits", "sales_order_id", "ALTER TABLE field_visits ADD COLUMN sales_order_id INTEGER")
     _ensure_column("vehicles", "driver_name", "ALTER TABLE vehicles ADD COLUMN driver_name VARCHAR(120)")
+    _ensure_column("vehicles", "live_status", "ALTER TABLE vehicles ADD COLUMN live_status VARCHAR(20) DEFAULT 'idle'")
 
 
 def _sync_company_branding(db) -> None:
@@ -284,6 +287,59 @@ def _sync_vehicles(db) -> None:
     print("Fleet set to 1 vehicle / 1 driver")
 
 
+def _sync_demo_deliveries(db) -> None:
+    from datetime import date, timedelta
+
+    from app.core.models import Company, Customer, Delivery, Vehicle
+
+    org = db.query(Organization).first()
+    if not org:
+        return
+    company = db.query(Company).order_by(Company.id).first()
+    vehicle = db.query(Vehicle).filter(Vehicle.is_active.is_(True)).first()
+    customers = (
+        db.query(Customer).filter(Customer.company_id == company.id).order_by(Customer.id).limit(4).all()
+        if company
+        else []
+    )
+    if not company or len(customers) < 1:
+        return
+    today = date.today()
+    tomorrow = today + timedelta(days=1)
+    pending_today = (
+        db.query(Delivery)
+        .filter(Delivery.slot_date == today, Delivery.status == "pending")
+        .count()
+    )
+    if pending_today >= 3:
+        return
+    extras = [
+        (customers[0], today, "morning", "Glucose Syrup 2 MT"),
+        (customers[1] if len(customers) > 1 else customers[0], today, "afternoon", "Sucrose Fine 5 MT"),
+        (customers[2] if len(customers) > 2 else customers[0], today, "evening", "Lactose 1 MT"),
+        (customers[0], tomorrow, "morning", "Stabilizer 3 MT"),
+    ]
+    have = {(d.customer_id, d.slot_date.isoformat(), d.slot) for d in db.query(Delivery).all()}
+    plan = [row for row in extras if (row[0].id, row[1].isoformat(), row[2]) not in have]
+    for cust, when, slot, item in plan:
+        if not cust.address:
+            cust.address = "Plot 12, Peenya Industrial Area, Bengaluru"
+        db.add(
+            Delivery(
+                organization_id=org.id,
+                company_id=company.id,
+                customer_id=cust.id,
+                vehicle_id=vehicle.id if vehicle else None,
+                item_summary=item,
+                slot_date=when,
+                slot=slot,
+                status="pending",
+            )
+        )
+    db.commit()
+    print("Demo deliveries created")
+
+
 def _sync_demo_customers(db) -> None:
     from app.core.models import Company, Customer
 
@@ -345,6 +401,7 @@ def seed() -> None:
             )
             _sync_vehicles(db)
             _sync_demo_customers(db)
+            _sync_demo_deliveries(db)
             print("Seed skipped: already initialized (branding + role users refreshed)")
             return
 
