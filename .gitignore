@@ -7,6 +7,13 @@ __pycache__/
 node_modules/
 frontend/.next/
 frontend/out/
+frontend/dist/
+frontend/.vinxi/
+frontend/.output/
+frontend/.nitro/
+frontend/.tanstack/
+frontend/.env
+frontend/.env.local
 pgdata/
 *.egg-info/
 .DS_Store

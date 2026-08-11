@@ -27,7 +27,7 @@ class RoleName(str, enum.Enum):
     SALES = "sales"
     ACCOUNTANT = "accountant"
     LOGISTICS = "logistics"
-    WAREHOUSE = "warehouse"
+    WAREHOUSE = "warehouse"  # ponytail: legacy DB enum; no ROLE_PERMS — supervisor owns warehouse
 
 
 class LeadStatus(str, enum.Enum):
@@ -64,12 +64,6 @@ class InvoiceStatus(str, enum.Enum):
     CANCELLED = "cancelled"
 
 
-class ApprovalStatus(str, enum.Enum):
-    PENDING = "pending"
-    APPROVED = "approved"
-    REJECTED = "rejected"
-
-
 class Organization(Base):
     __tablename__ = "organizations"
 
@@ -94,6 +88,7 @@ class Company(Base):
     phone: Mapped[str | None] = mapped_column(String(30))
     email: Mapped[str | None] = mapped_column(String(120))
     invoice_prefix: Mapped[str] = mapped_column(String(20), default="INV")
+    logo_url: Mapped[str | None] = mapped_column(String(255))
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -140,6 +135,27 @@ class User(Base):
     organization: Mapped["Organization"] = relationship(back_populates="users")
     role: Mapped["Role"] = relationship()
     companies: Mapped[list["UserCompany"]] = relationship(back_populates="user")
+    extra_permissions: Mapped[list["UserPermission"]] = relationship(
+        back_populates="user",
+        foreign_keys="UserPermission.user_id",
+    )
+
+
+class UserPermission(Base):
+    """Extra capability on top of role — forever (expires_at null) or until a date."""
+
+    __tablename__ = "user_permissions"
+    __table_args__ = (UniqueConstraint("user_id", "permission_id"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    permission_id: Mapped[int] = mapped_column(ForeignKey("permissions.id"), nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    granted_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    user: Mapped["User"] = relationship(back_populates="extra_permissions", foreign_keys=[user_id])
+    permission: Mapped["Permission"] = relationship()
 
 
 class UserCompany(Base):
@@ -253,7 +269,6 @@ class Quotation(Base):
         Enum(QuotationStatus, name="quotation_status"), default=QuotationStatus.DRAFT
     )
     notes: Mapped[str | None] = mapped_column(Text)
-    needs_price_approval: Mapped[bool] = mapped_column(Boolean, default=False)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -271,23 +286,6 @@ class QuotationLine(Base):
     base_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
 
     quotation: Mapped["Quotation"] = relationship(back_populates="lines")
-
-
-class Approval(Base):
-    __tablename__ = "approvals"
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
-    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
-    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
-    quotation_id: Mapped[int] = mapped_column(ForeignKey("quotations.id"), nullable=False)
-    status: Mapped[ApprovalStatus] = mapped_column(
-        Enum(ApprovalStatus, name="approval_status"), default=ApprovalStatus.PENDING
-    )
-    requested_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    decided_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
-    reason: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class SalesOrder(Base):

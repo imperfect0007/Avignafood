@@ -6,7 +6,6 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+psycopg2://avighnya:avighnya@localhost:5432/avighnya"
     secret_key: str = "change-me-in-production-avighnya-foods-secret"
-    algorithm: str = "HS256"
     access_token_expire_minutes: int = 60 * 12
     cors_origins: str = "http://localhost:3000"
 

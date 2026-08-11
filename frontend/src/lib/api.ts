@@ -1,4 +1,4 @@
-export const API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
+export const API_URL = import.meta.env.VITE_API_URL ?? "";
 
 export type Me = {
   user: {
@@ -32,16 +32,21 @@ export function clearAuth() {
   localStorage.removeItem("companyId");
 }
 
-export async function api<T>(
-  path: string,
-  options: RequestInit & { form?: boolean } = {}
-): Promise<T> {
+/** Resolve logo/media paths from API (/uploads/…) or frontend public (/logos/…). */
+export function mediaUrl(path: string | null | undefined): string {
+  if (!path) return "";
+  if (/^(https?:|blob:|data:)/i.test(path)) return path;
+  if (path.startsWith("/uploads/")) return `${API_URL}${path}`;
+  return path;
+}
+
+export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers = new Headers(options.headers || {});
   const token = getToken();
   if (token) headers.set("Authorization", `Bearer ${token}`);
   const companyId = getCompanyId();
   if (companyId) headers.set("X-Company-Id", companyId);
-  if (options.body && !options.form && !(options.body instanceof URLSearchParams)) {
+  if (options.body && !(options.body instanceof URLSearchParams) && !(options.body instanceof FormData) && !headers.has("Content-Type")) {
     headers.set("Content-Type", "application/json");
   }
   const res = await fetch(`${API_URL}${path}`, { ...options, headers });

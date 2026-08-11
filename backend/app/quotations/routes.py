@@ -5,16 +5,8 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.audit.service import write_audit
 from app.core.database import get_db
-from app.core.deps import AuthContext, require_perms
-from app.core.models import (
-    Approval,
-    ApprovalStatus,
-    Product,
-    Quotation,
-    QuotationLine,
-    QuotationStatus,
-    RoleName,
-)
+from app.core.deps import AuthContext, require_owner, require_perms
+from app.core.models import Product, Quotation, QuotationLine, QuotationStatus
 from app.core.schemas import QuotationCreate, QuotationOut
 
 router = APIRouter(prefix="/quotations", tags=["quotations"])
@@ -28,7 +20,6 @@ def _out(q: Quotation) -> QuotationOut:
         lead_id=q.lead_id,
         status=q.status.value,
         notes=q.notes,
-        needs_price_approval=q.needs_price_approval,
         lines=[
             {
                 "id": ln.id,
@@ -101,21 +92,7 @@ def create_quotation(
             )
         )
 
-    q.needs_price_approval = needs_approval
-    if needs_approval:
-        q.status = QuotationStatus.PENDING_APPROVAL
-        db.add(
-            Approval(
-                organization_id=auth.organization_id,
-                company_id=company_id,
-                quotation_id=q.id,
-                status=ApprovalStatus.PENDING,
-                requested_by_id=auth.user.id,
-                reason="Unit price below base price",
-            )
-        )
-    else:
-        q.status = QuotationStatus.APPROVED
+    q.status = QuotationStatus.PENDING_APPROVAL if needs_approval else QuotationStatus.APPROVED
 
     write_audit(
         db,
@@ -135,13 +112,10 @@ def create_quotation(
 @router.post("/{quotation_id}/approve", response_model=QuotationOut)
 def approve_quotation(
     quotation_id: int,
-    auth: AuthContext = Depends(require_perms("quotations.approve")),
+    auth: AuthContext = Depends(require_owner()),
     db: Session = Depends(get_db),
 ):
     company_id = auth.require_company()
-    if auth.role not in (RoleName.OWNER, RoleName.SUPER_ADMIN, RoleName.SUPERVISOR):
-        # permission already checked; allow
-        pass
     q = (
         db.query(Quotation)
         .options(joinedload(Quotation.lines))
@@ -157,15 +131,6 @@ def approve_quotation(
     if q.status != QuotationStatus.PENDING_APPROVAL:
         raise HTTPException(status_code=400, detail="Quotation is not pending approval")
     q.status = QuotationStatus.APPROVED
-    approval = (
-        db.query(Approval)
-        .filter(Approval.quotation_id == q.id, Approval.status == ApprovalStatus.PENDING)
-        .first()
-    )
-    if approval:
-        approval.status = ApprovalStatus.APPROVED
-        approval.decided_by_id = auth.user.id
-        approval.decided_at = datetime.now(timezone.utc)
     write_audit(
         db,
         action="approve",
@@ -183,7 +148,7 @@ def approve_quotation(
 @router.post("/{quotation_id}/reject", response_model=QuotationOut)
 def reject_quotation(
     quotation_id: int,
-    auth: AuthContext = Depends(require_perms("quotations.approve")),
+    auth: AuthContext = Depends(require_owner()),
     db: Session = Depends(get_db),
 ):
     company_id = auth.require_company()
@@ -200,15 +165,6 @@ def reject_quotation(
     if not q:
         raise HTTPException(status_code=404, detail="Quotation not found")
     q.status = QuotationStatus.REJECTED
-    approval = (
-        db.query(Approval)
-        .filter(Approval.quotation_id == q.id, Approval.status == ApprovalStatus.PENDING)
-        .first()
-    )
-    if approval:
-        approval.status = ApprovalStatus.REJECTED
-        approval.decided_by_id = auth.user.id
-        approval.decided_at = datetime.now(timezone.utc)
     write_audit(
         db,
         action="reject",

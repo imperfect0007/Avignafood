@@ -1,20 +1,18 @@
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+import bcrypt
 from jose import JWTError, jwt
-from passlib.context import CryptContext
 
 from app.core.config import settings
 
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
-
 
 def hash_password(password: str) -> str:
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
 
 def verify_password(plain: str, hashed: str) -> bool:
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode(), hashed.encode())
 
 
 def create_access_token(data: dict[str, Any], expires_minutes: int | None = None) -> str:
@@ -23,19 +21,15 @@ def create_access_token(data: dict[str, Any], expires_minutes: int | None = None
         minutes=expires_minutes or settings.access_token_expire_minutes
     )
     payload.update({"exp": expire})
-    return jwt.encode(payload, settings.secret_key, algorithm=settings.algorithm)
-
-
-def decode_token(token: str) -> dict[str, Any]:
-    return jwt.decode(token, settings.secret_key, algorithms=[settings.algorithm])
-
-
-class TokenError(Exception):
-    pass
+    return jwt.encode(payload, settings.secret_key, algorithm="HS256")
 
 
 def safe_decode(token: str) -> dict[str, Any]:
     try:
-        return decode_token(token)
+        return jwt.decode(token, settings.secret_key, algorithms=["HS256"])
     except JWTError as e:
         raise TokenError(str(e)) from e
+
+
+class TokenError(Exception):
+    pass

@@ -1,0 +1,216 @@
+import { useCallback, useEffect, useState } from "react";
+import { api } from "@/lib/api";
+import { useMe } from "@/lib/me-context";
+import { approvals, byFirm, inr } from "@/lib/erp-data";
+import { useCompany } from "@/lib/company-context";
+import { money } from "@/lib/format";
+
+export type PendingItem = {
+  key: string;
+  source: "api" | "mock";
+  quoteId?: number;
+  customer: string;
+  product: string;
+  qty: string;
+  asked: number;
+  floor: number;
+  salesperson: string;
+};
+
+type Quote = {
+  id: number;
+  customer_id: number;
+  status: string;
+  notes: string | null;
+  lines: { product_id: number; quantity: number; unit_price: number; base_price: number }[];
+};
+
+type Customer = { id: number; name: string };
+
+/** Only Owner / Super Admin may approve — not Supervisor or other roles. */
+const canApproveRole = (role: string) => role === "super_admin" || role === "owner";
+
+export function usePendingApprovals() {
+  const { me } = useMe();
+  const { firm } = useCompany();
+  const [items, setItems] = useState<PendingItem[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const refresh = useCallback(async () => {
+    if (!me || !canApproveRole(me.user.role)) {
+      setItems([]);
+      return;
+    }
+    setLoading(true);
+    const dismissed = new Set(JSON.parse(sessionStorage.getItem("approvalDismissed") || "[]") as string[]);
+    try {
+      const [quotes, customers] = await Promise.all([
+        api<Quote[]>("/api/v1/quotations").catch(() => [] as Quote[]),
+        api<Customer[]>("/api/v1/customers").catch(() => [] as Customer[]),
+      ]);
+      const names = Object.fromEntries(customers.map((c) => [c.id, c.name]));
+      const fromApi: PendingItem[] = quotes
+        .filter((q) => q.status === "pending_approval")
+        .map((q) => {
+          const line = q.lines[0];
+          return {
+            key: `q-${q.id}`,
+            source: "api" as const,
+            quoteId: q.id,
+            customer: names[q.customer_id] || `Customer #${q.customer_id}`,
+            product: line ? `Product #${line.product_id}` : "Quotation",
+            qty: line ? `${line.quantity}` : "—",
+            asked: line ? Number(line.unit_price) : 0,
+            floor: line ? Number(line.base_price) : 0,
+            salesperson: "Sales",
+          };
+        });
+
+      // Demo fallback so popup still shows with seed mock data
+      const fromMock: PendingItem[] = byFirm(approvals, firm)
+        .filter((a) => a.status === "Pending")
+        .map((a) => ({
+          key: `m-${a.id}`,
+          source: "mock" as const,
+          customer: a.customer,
+          product: a.product,
+          qty: a.qty,
+          asked: a.askedPrice,
+          floor: a.floorPrice,
+          salesperson: a.salesperson,
+        }));
+
+      const merged = (fromApi.length ? fromApi : fromMock).filter((i) => !dismissed.has(i.key));
+      setItems(merged);
+    } finally {
+      setLoading(false);
+    }
+  }, [me, firm]);
+
+  useEffect(() => {
+    refresh();
+    const t = setInterval(refresh, 20_000);
+    return () => clearInterval(t);
+  }, [refresh]);
+
+  const dismiss = (key: string) => {
+    const list = JSON.parse(sessionStorage.getItem("approvalDismissed") || "[]") as string[];
+    list.push(key);
+    sessionStorage.setItem("approvalDismissed", JSON.stringify(list));
+    setItems((prev) => prev.filter((i) => i.key !== key));
+  };
+
+  return { items, loading, refresh, dismiss, canApprove: me ? canApproveRole(me.user.role) : false };
+}
+
+export function ApprovalPopup({
+  open,
+  onClose,
+  items,
+  onDecided,
+}: {
+  open: boolean;
+  onClose: () => void;
+  items: PendingItem[];
+  onDecided: (key: string, action: "approve" | "reject" | "later") => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState("");
+  const current = items[0];
+
+  if (!open || !current) return null;
+
+  async function decide(action: "approve" | "reject") {
+    setBusy(current.key);
+    setError("");
+    try {
+      if (current.source === "api" && current.quoteId) {
+        await api(`/api/v1/quotations/${current.quoteId}/${action}`, { method: "POST" });
+      }
+      onDecided(current.key, action);
+      if (items.length <= 1) onClose();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Failed");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+      <button className="absolute inset-0 bg-foreground/40 backdrop-blur-[2px]" aria-label="Close" onClick={onClose} />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="approval-title"
+        className="relative z-10 w-full max-h-[88dvh] overflow-y-auto rounded-t-2xl border border-border bg-card p-5 shadow-[var(--shadow-soft)] sm:max-w-md sm:rounded-2xl"
+      >
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border sm:hidden" />
+        <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
+          Price approval · {items.length} waiting
+        </p>
+        <h2 id="approval-title" className="mt-1 text-xl font-semibold tracking-tight">
+          {current.customer}
+        </h2>
+        <p className="mt-1 text-sm text-muted-foreground">
+          {current.salesperson} · below floor rate
+        </p>
+
+        <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+          <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+            <dt className="text-xs text-muted-foreground">Product</dt>
+            <dd className="mt-0.5 font-medium">{current.product}</dd>
+          </div>
+          <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+            <dt className="text-xs text-muted-foreground">Qty</dt>
+            <dd className="mt-0.5 font-medium tabular-nums">{current.qty}</dd>
+          </div>
+          <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+            <dt className="text-xs text-muted-foreground">Asked</dt>
+            <dd className="mt-0.5 font-medium tabular-nums text-warning">{money(current.asked)}</dd>
+          </div>
+          <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+            <dt className="text-xs text-muted-foreground">Floor</dt>
+            <dd className="mt-0.5 font-medium tabular-nums">{money(current.floor)}</dd>
+          </div>
+        </dl>
+
+        {current.asked < current.floor && (
+          <p className="mt-3 text-xs text-destructive">
+            {inr(current.floor - current.asked)} below floor
+          </p>
+        )}
+        {error && <p className="mt-2 text-sm text-destructive">{error}</p>}
+
+        <div className="mt-5 grid grid-cols-2 gap-2">
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => decide("approve")}
+            className="rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground disabled:opacity-60"
+          >
+            {busy === current.key ? "…" : "Approve"}
+          </button>
+          <button
+            type="button"
+            disabled={!!busy}
+            onClick={() => decide("reject")}
+            className="rounded-xl border border-border px-4 py-3 text-sm text-destructive disabled:opacity-60"
+          >
+            Decline
+          </button>
+        </div>
+        <button
+          type="button"
+          className="mt-3 w-full py-2 text-sm text-muted-foreground"
+          onClick={() => {
+            onDecided(current.key, "later");
+            if (items.length <= 1) onClose();
+          }}
+        >
+          Later
+        </button>
+      </div>
+    </div>
+  );
+}

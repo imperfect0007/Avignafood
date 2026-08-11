@@ -1,10 +1,10 @@
-# Avighnya Foods — Initial Stage
+# Avighna Foods — Initial Stage
 
 B2B distribution ERP: Lead → Customer → Quotation → Sales Order → Invoice → Payment.
 
 ## Stack
 
-- **Frontend:** Next.js + TypeScript + Tailwind (`frontend/`)
+- **Frontend:** Lovable UI ([ingredient-flow-suite](https://github.com/TejasviJois/ingredient-flow-suite)) — Vite + TanStack Start (`frontend/`)
 - **Backend:** FastAPI + SQLAlchemy (`backend/`)
 - **Database:** PostgreSQL via Docker Compose
 
@@ -16,7 +16,7 @@ WhatsApp and AI are deferred (last phase).
 # 1. Start Postgres + API
 docker compose up -d --build
 
-# 2. Frontend
+# 2. Frontend (Lovable UI wired to API)
 cd frontend
 npm install
 npm run dev
@@ -24,7 +24,6 @@ npm run dev
 
 - App: http://localhost:3000  
 - API docs: http://localhost:8000/docs  
-- Health: http://localhost:8000/health  
 
 ### Seed logins
 
@@ -32,19 +31,20 @@ npm run dev
 |-------|----------|------|
 | admin@avighnya.local | admin123 | Super Admin |
 | owner@avighnya.local | owner123 | Owner |
+| supervisor@avighnya.local | super123 | Supervisor |
 | sales@avighnya.local | sales123 | Sales |
+| accounts@avighnya.local | accounts123 | Accounts |
+| logistics@avighnya.local | logistics123 | Logistics |
 
-## Smoke test (core cycle)
+### Companies
 
-With API running on port 8000:
+1. Asian Apex & Co.  
+2. Avighna Speciality Ingredients Pvt Ltd  
+3. Ganesh Inc.  
+4. Atharva Associates
+
+## Smoke test
 
 ```bash
-cd backend
-pip install -r requirements.txt
-# if API is in Docker, only need httpx locally:
-python -m scripts.smoke
+docker compose exec api python -m scripts.smoke
 ```
-
-## API company scope
-
-Send `Authorization: Bearer <token>` and `X-Company-Id: <id>` on business endpoints.

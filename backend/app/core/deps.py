@@ -1,9 +1,12 @@
+from datetime import datetime, timezone
+
 from fastapi import Depends, Header, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.core.database import get_db
-from app.core.models import Permission, RoleName, RolePermission, User
+from app.core.models import Permission, RoleName, RolePermission, User, UserPermission
 from app.core.security import TokenError, safe_decode
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/login")
@@ -24,11 +27,6 @@ class AuthContext:
         if self.company_id is None:
             raise HTTPException(status_code=400, detail="X-Company-Id header required")
         return self.company_id
-
-    def has_perm(self, code: str) -> bool:
-        if self.role == RoleName.SUPER_ADMIN:
-            return True
-        return code in self.permissions
 
 
 def get_current_user(
@@ -66,6 +64,18 @@ def get_auth(
     )
     permission_set = {p[0] for p in perms}
 
+    now = datetime.now(timezone.utc)
+    extras = (
+        db.query(Permission.code)
+        .join(UserPermission, UserPermission.permission_id == Permission.id)
+        .filter(
+            UserPermission.user_id == user.id,
+            or_(UserPermission.expires_at.is_(None), UserPermission.expires_at > now),
+        )
+        .all()
+    )
+    permission_set |= {p[0] for p in extras}
+
     company_id: int | None = None
     if x_company_id:
         try:
@@ -93,5 +103,16 @@ def require_perms(*codes: str):
             if code not in auth.permissions:
                 raise HTTPException(status_code=403, detail=f"Missing permission: {code}")
         return auth
+
+    return _dep
+
+
+def require_owner():
+    """Price / quote approval — Owner or Super Admin only."""
+
+    def _dep(auth: AuthContext = Depends(get_auth)) -> AuthContext:
+        if auth.role in (RoleName.SUPER_ADMIN, RoleName.OWNER):
+            return auth
+        raise HTTPException(status_code=403, detail="Only owner can approve")
 
     return _dep

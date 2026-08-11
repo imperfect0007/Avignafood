@@ -1,5 +1,8 @@
+from pathlib import Path
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
 from app.audit.routes import router as audit_router
 from app.auth.routes import router as auth_router
@@ -42,6 +45,10 @@ for r in (
     audit_router,
 ):
     app.include_router(r, prefix="/api/v1")
+
+_uploads = Path(__file__).resolve().parent.parent / "uploads"
+_uploads.mkdir(parents=True, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=_uploads), name="uploads")
 
 
 @app.get("/health")

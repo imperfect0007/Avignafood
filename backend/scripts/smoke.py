@@ -119,7 +119,7 @@ def main() -> None:
         assert inv2.json()["status"] == "paid"
         assert float(inv2.json()["outstanding"]) == 0.0
 
-        dash = client.get("/api/v1/dashboard", headers=headers)
+        dash = client.get("/api/v1/dashboard/supervisor", headers=headers)
         dash.raise_for_status()
 
         print("SMOKE OK")

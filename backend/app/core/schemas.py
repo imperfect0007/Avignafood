@@ -1,7 +1,7 @@
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class ORMModel(BaseModel):
@@ -14,14 +14,9 @@ class TokenOut(BaseModel):
     token_type: str = "bearer"
 
 
-class LoginIn(BaseModel):
-    username: EmailStr
-    password: str
-
-
 class UserOut(ORMModel):
     id: int
-    email: EmailStr
+    email: str
     full_name: str
     organization_id: int
     role: str
@@ -34,6 +29,27 @@ class MeOut(BaseModel):
     permissions: list[str]
 
 
+class PermissionOut(ORMModel):
+    id: int
+    code: str
+    description: str | None = None
+
+
+class UserPermissionGrant(BaseModel):
+    permission_code: str
+    forever: bool = True
+    expires_on: date | None = None  # ignored when forever=True; end of that day UTC
+
+
+class UserPermissionOut(BaseModel):
+    id: int
+    permission_code: str
+    description: str | None = None
+    forever: bool
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+
+
 # ---- Companies ----
 class CompanyCreate(BaseModel):
     legal_name: str
@@ -44,6 +60,7 @@ class CompanyCreate(BaseModel):
     phone: str | None = None
     email: str | None = None
     invoice_prefix: str = "INV"
+    logo_url: str | None = None
 
 
 class CompanyUpdate(BaseModel):
@@ -55,6 +72,7 @@ class CompanyUpdate(BaseModel):
     phone: str | None = None
     email: str | None = None
     invoice_prefix: str | None = None
+    logo_url: str | None = None
     is_active: bool | None = None
 
 
@@ -69,12 +87,13 @@ class CompanyOut(ORMModel):
     phone: str | None
     email: str | None
     invoice_prefix: str
+    logo_url: str | None = None
     is_active: bool
 
 
 # ---- Users ----
 class UserCreate(BaseModel):
-    email: EmailStr
+    email: str
     full_name: str
     password: str = Field(min_length=6)
     role: str
@@ -254,7 +273,6 @@ class QuotationOut(ORMModel):
     lead_id: int | None
     status: str
     notes: str | None
-    needs_price_approval: bool
     lines: list[dict]
 
 
@@ -313,10 +331,55 @@ class PaymentOut(ORMModel):
     paid_at: date
 
 
-class DashboardOut(BaseModel):
+class AccountsDashboardOut(BaseModel):
+    today_collections: Decimal
+    month_collections: Decimal
+    total_receivables: Decimal
+    total_overdue: Decimal
+    due_today: Decimal
+    due_this_week: Decimal
+    unpaid_invoices: int
+    partial_invoices: int
+    overdue_invoices: int
+    credit_exposure: Decimal
+    active_customers: int
+
+
+class SupervisorDashboardOut(BaseModel):
     today_sales: Decimal
     month_sales: Decimal
+    active_leads: int
+    unassigned_leads: int
+    pending_approvals: int
+    pending_orders: int
+    confirmed_orders: int
+    low_stock_items: int
     outstanding: Decimal
+    overdue_invoices: int
+    team_users: int
+    total_stock_qty: Decimal
+    inventory_value: Decimal
+    available_stock: Decimal
+    ready_for_dispatch: int
+    warehouses: int
+
+
+class SalesDashboardOut(BaseModel):
+    active_leads: int
+    new_leads: int
+    pending_quotations: int
+    approved_quotations: int
     open_orders: int
-    active_customers: int
-    open_leads: int
+    month_sales: Decimal
+    month_target: Decimal
+    achievement_pct: Decimal
+    my_customers: int
+    conversion_rate: Decimal
+
+
+class LogisticsDashboardOut(BaseModel):
+    pending_dispatches: int
+    ready_for_dispatch: int
+    today_dispatches: int
+    delivered_today: int
+    confirmed_orders: int
