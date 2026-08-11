@@ -17,14 +17,27 @@ export const Route = createFileRoute("/sales")({
   component: Sales,
 });
 
+type ApprovalRow = (typeof approvals)[number];
+
 function Sales() {
   const { firm } = useCompany();
   const rows = byFirm(approvals, firm);
   const [decisions, setDecisions] = useState<Record<string, string>>({});
   const [popupOpen, setPopupOpen] = useState(false);
+  const [selected, setSelected] = useState<ApprovalRow | null>(null);
   const { items, dismiss, canApprove, refresh } = usePendingApprovals();
 
   const pending = rows.filter((r) => r.status === "Pending" && !decisions[r.id]);
+
+  function statusOf(a: ApprovalRow) {
+    return decisions[a.id] ?? a.status;
+  }
+
+  function decideSelected(action: "Approved" | "Rejected") {
+    if (!selected) return;
+    setDecisions((d) => ({ ...d, [selected.id]: action }));
+    setSelected(null);
+  }
 
   return (
     <>
@@ -65,16 +78,18 @@ function Sales() {
             const decided = decisions[a.id];
             return (
               <Panel key={a.id} title={a.customer} hint={`${a.raised} · ${a.salesperson}`}>
-                <dl className="grid grid-cols-2 gap-y-2 text-sm sm:gap-y-3">
-                  <dt className="text-muted-foreground">Product</dt>
-                  <dd className="truncate">{a.product}</dd>
-                  <dt className="text-muted-foreground">Qty</dt>
-                  <dd className="tabular-nums">{a.qty}</dd>
-                  <dt className="text-muted-foreground">Asked</dt>
-                  <dd className="tabular-nums font-medium">{inr(a.askedPrice)}</dd>
-                  <dt className="text-muted-foreground">Floor</dt>
-                  <dd className="tabular-nums">{inr(a.floorPrice)}</dd>
-                </dl>
+                <button type="button" className="w-full text-left" onClick={() => setSelected(a)}>
+                  <dl className="grid grid-cols-2 gap-y-2 text-sm sm:gap-y-3">
+                    <dt className="text-muted-foreground">Product</dt>
+                    <dd className="truncate">{a.product}</dd>
+                    <dt className="text-muted-foreground">Qty</dt>
+                    <dd className="tabular-nums">{a.qty}</dd>
+                    <dt className="text-muted-foreground">Asked</dt>
+                    <dd className="tabular-nums font-medium">{inr(a.askedPrice)}</dd>
+                    <dt className="text-muted-foreground">Floor</dt>
+                    <dd className="tabular-nums">{inr(a.floorPrice)}</dd>
+                  </dl>
+                </button>
                 {decided ? (
                   <p className="mt-3 text-sm sm:mt-4">
                     <Badge tone={decided === "Approved" ? "good" : decided === "Rejected" ? "bad" : "warn"}>{decided}</Badge>
@@ -82,12 +97,14 @@ function Sales() {
                 ) : canApprove ? (
                   <div className="mt-4 flex flex-col gap-2 sm:mt-5 sm:flex-row sm:flex-wrap">
                     <button
-                      onClick={() => setPopupOpen(true)}
+                      type="button"
+                      onClick={() => setSelected(a)}
                       className="rounded-lg bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground"
                     >
-                      Open approval
+                      Open
                     </button>
                     <button
+                      type="button"
                       onClick={() => setDecisions((d) => ({ ...d, [a.id]: "Approved" }))}
                       className="rounded-lg border border-border px-4 py-2.5 text-sm hover:bg-secondary"
                     >
@@ -104,25 +121,108 @@ function Sales() {
           })}
       </div>
 
-      <Panel title="Recent decisions" className="mt-5 sm:mt-6">
+      <Panel title="Recent decisions" hint="Tap a row" className="mt-5 sm:mt-6">
         <Table head={["Request", "Customer", "Product", "Qty", "Rate", "Rep", "Status"]}>
-          {rows.map((a) => (
-            <tr key={a.id}>
-              <Td className="font-medium">{a.id}</Td>
-              <Td>{a.customer}</Td>
-              <Td className="text-muted-foreground">{a.product}</Td>
-              <Td className="tabular-nums">{a.qty}</Td>
-              <Td className="tabular-nums">{inr(a.askedPrice)}</Td>
-              <Td className="text-muted-foreground">{a.salesperson}</Td>
-              <Td>
-                <Badge tone={(decisions[a.id] ?? a.status) === "Approved" ? "good" : (decisions[a.id] ?? a.status) === "Rejected" ? "bad" : "warn"}>
-                  {decisions[a.id] ?? a.status}
-                </Badge>
-              </Td>
-            </tr>
-          ))}
+          {rows.map((a) => {
+            const st = statusOf(a);
+            return (
+              <tr
+                key={a.id}
+                className="cursor-pointer hover:bg-secondary/40"
+                onClick={() => setSelected(a)}
+              >
+                <Td className="font-medium">{a.id}</Td>
+                <Td>{a.customer}</Td>
+                <Td className="text-muted-foreground">{a.product}</Td>
+                <Td className="tabular-nums">{a.qty}</Td>
+                <Td className="tabular-nums">{inr(a.askedPrice)}</Td>
+                <Td className="text-muted-foreground">{a.salesperson}</Td>
+                <Td>
+                  <Badge tone={st === "Approved" ? "good" : st === "Rejected" ? "bad" : "warn"}>{st}</Badge>
+                </Td>
+              </tr>
+            );
+          })}
         </Table>
       </Panel>
+
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+          <button type="button" className="absolute inset-0 bg-foreground/40" aria-label="Close" onClick={() => setSelected(null)} />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="decision-title"
+            className="relative z-10 w-full max-h-[88dvh] overflow-y-auto rounded-t-2xl border border-border bg-card p-5 shadow-[var(--shadow-soft)] sm:max-w-md sm:rounded-2xl"
+          >
+            <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
+              {selected.id} · {selected.raised}
+            </p>
+            <h2 id="decision-title" className="mt-1 text-xl font-semibold tracking-tight">
+              {selected.customer}
+            </h2>
+            <p className="mt-1 text-sm text-muted-foreground">{selected.salesperson}</p>
+
+            <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Product</dt>
+                <dd className="mt-0.5 font-medium">{selected.product}</dd>
+              </div>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Qty</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">{selected.qty}</dd>
+              </div>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Asked</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">{inr(selected.askedPrice)}</dd>
+              </div>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Floor</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">{inr(selected.floorPrice)}</dd>
+              </div>
+            </dl>
+
+            {selected.askedPrice < selected.floorPrice && statusOf(selected) === "Pending" && (
+              <p className="mt-3 text-xs text-destructive">
+                {inr(selected.floorPrice - selected.askedPrice)} below floor
+              </p>
+            )}
+
+            <div className="mt-4">
+              <Badge tone={statusOf(selected) === "Approved" ? "good" : statusOf(selected) === "Rejected" ? "bad" : "warn"}>
+                {statusOf(selected)}
+              </Badge>
+            </div>
+
+            {canApprove && statusOf(selected) === "Pending" ? (
+              <div className="mt-5 grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => decideSelected("Approved")}
+                  className="rounded-xl bg-primary px-4 py-3 text-sm font-medium text-primary-foreground"
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => decideSelected("Rejected")}
+                  className="rounded-xl border border-border px-4 py-3 text-sm text-destructive"
+                >
+                  Decline
+                </button>
+              </div>
+            ) : (
+              <button
+                type="button"
+                onClick={() => setSelected(null)}
+                className="mt-5 w-full rounded-xl border border-border py-3 text-sm"
+              >
+                Close
+              </button>
+            )}
+          </div>
+        </div>
+      )}
 
       <ApprovalPopup
         open={popupOpen && items.length > 0}
