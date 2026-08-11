@@ -1,7 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useCompany } from "@/lib/company-context";
+import { useMe } from "@/lib/me-context";
 import { byFirm, dispatches, mt } from "@/lib/erp-data";
 import { Badge, Kpi, PageHeader, Panel, Table, Td } from "@/components/erp/ui-bits";
+import { VehicleEditor } from "@/components/erp/VehicleBoard";
 
 export const Route = createFileRoute("/dispatch")({
   head: () => ({
@@ -19,11 +21,18 @@ const stages = ["Pending", "Allocated", "Packed", "Ready", "Dispatched", "Delive
 
 function Dispatch() {
   const { firm } = useCompany();
+  const { me } = useMe();
   const rows = byFirm(dispatches, firm);
+  const canMarkVehicles = ["supervisor", "logistics", "owner", "super_admin"].includes(me?.user.role || "");
 
   return (
     <>
       <PageHeader title="Dispatch" subtitle="A single line of sight from allocation to delivery, so nobody has to call the warehouse." />
+      {canMarkVehicles && (
+        <div className="mb-6">
+          <VehicleEditor />
+        </div>
+      )}
 
       <div className="grid gap-4 sm:grid-cols-3">
         <Kpi label="Moving today" value={String(rows.filter((d) => d.status === "Dispatched").length)} />

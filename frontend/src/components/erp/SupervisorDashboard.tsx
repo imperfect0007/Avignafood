@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
 import { greeting, money } from "@/lib/format";
 import { Badge, Kpi, PageHeader, Panel } from "@/components/erp/ui-bits";
+import { VehicleEditor } from "@/components/erp/VehicleBoard";
 
 type SupervisorDash = {
   today_sales: string;
@@ -82,6 +83,10 @@ export function SupervisorDashboard() {
           tone={data && data.low_stock_items > 0 ? "bad" : "good"}
         />
         <Kpi label="Warehouses" value={data ? String(data.warehouses) : "—"} />
+      </div>
+
+      <div className="mt-6">
+        <VehicleEditor />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">

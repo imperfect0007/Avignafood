@@ -4,7 +4,7 @@ from sqlalchemy.orm import Session
 from app.audit.service import write_audit
 from app.core.database import get_db
 from app.core.deps import AuthContext, require_perms
-from app.core.models import Customer, Lead, LeadStatus
+from app.core.models import Customer, Lead, LeadStatus, RoleName
 from app.core.schemas import CustomerOut, LeadCreate, LeadOut, LeadUpdate
 
 router = APIRouter(prefix="/leads", tags=["leads"])
@@ -29,6 +29,7 @@ def _out(lead: Lead) -> LeadOut:
         notes=lead.notes,
         lost_reason=lead.lost_reason,
         customer_id=lead.customer_id,
+        voice_url=getattr(lead, "voice_url", None),
     )
 
 
@@ -53,12 +54,19 @@ def create_lead(
     auth: AuthContext = Depends(require_perms("leads.create")),
     db: Session = Depends(get_db),
 ):
-    company_id = auth.require_company()
+    payload = body.model_dump()
+    company_id = payload.pop("company_id", None) or auth.company_id
+    if company_id is None:
+        raise HTTPException(status_code=400, detail="Pick a company for this lead")
+    allowed = {uc.company_id for uc in auth.user.companies}
+    if auth.role not in (RoleName.SUPER_ADMIN, RoleName.OWNER) and company_id not in allowed:
+        raise HTTPException(status_code=403, detail="No access to this company")
     lead = Lead(
         organization_id=auth.organization_id,
         company_id=company_id,
         status=LeadStatus.NEW,
-        **body.model_dump(),
+        assigned_to_id=payload.get("assigned_to_id") or auth.user.id,
+        **{k: v for k, v in payload.items() if k != "assigned_to_id"},
     )
     db.add(lead)
     db.flush()

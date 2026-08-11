@@ -1,6 +1,7 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { FormEvent, useState } from "react";
 import { API_URL, setAuth, api } from "@/lib/api";
+import { useMe } from "@/lib/me-context";
 import { firms } from "@/lib/erp-data";
 
 export const Route = createFileRoute("/login")({
@@ -9,8 +10,9 @@ export const Route = createFileRoute("/login")({
 
 function LoginPage() {
   const navigate = useNavigate();
-  const [email, setEmail] = useState("admin@avighnya.local");
-  const [password, setPassword] = useState("admin123");
+  const { refresh } = useMe();
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
@@ -30,7 +32,8 @@ function LoginPage() {
       if (!res.ok) throw new Error("Invalid credentials");
       const data = await res.json();
       setAuth(data.access_token, firms[0].companyId);
-      // Prefer first company from API when available
+      const session = await refresh();
+      if (!session) throw new Error("Could not load your account");
       try {
         const companies = await api<{ id: number }[]>("/api/v1/companies");
         if (companies[0]) localStorage.setItem("companyId", String(companies[0].id));
@@ -63,6 +66,8 @@ function LoginPage() {
             value={email}
             onChange={(e) => setEmail(e.target.value)}
             type="email"
+            name="email"
+            autoComplete="username"
             required
           />
         </label>
@@ -73,6 +78,8 @@ function LoginPage() {
             value={password}
             onChange={(e) => setPassword(e.target.value)}
             type="password"
+            name="password"
+            autoComplete="current-password"
             required
           />
         </label>

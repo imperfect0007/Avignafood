@@ -207,6 +207,7 @@ class Lead(Base):
     status: Mapped[LeadStatus] = mapped_column(Enum(LeadStatus, name="lead_status"), default=LeadStatus.NEW)
     assigned_to_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     notes: Mapped[str | None] = mapped_column(Text)
+    voice_url: Mapped[str | None] = mapped_column(String(255))
     lost_reason: Mapped[str | None] = mapped_column(String(200))
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -389,3 +390,65 @@ class AuditLog(Base):
     entity_id: Mapped[int | None] = mapped_column(Integer)
     detail: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FieldVisit(Base):
+    __tablename__ = "field_visits"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), nullable=False)
+    lead_id: Mapped[int | None] = mapped_column(ForeignKey("leads.id"))
+    customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
+    sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("sales_orders.id"))
+    site_name: Mapped[str] = mapped_column(String(200), nullable=False)
+    contact_person: Mapped[str | None] = mapped_column(String(120))
+    phone: Mapped[str | None] = mapped_column(String(30))
+    notes: Mapped[str | None] = mapped_column(Text)
+    voice_url: Mapped[str | None] = mapped_column(String(255))
+    lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    accuracy_m: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
+    checked_in_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    media: Mapped[list["FieldVisitMedia"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
+
+
+class FieldVisitMedia(Base):
+    __tablename__ = "field_visit_media"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    visit_id: Mapped[int] = mapped_column(ForeignKey("field_visits.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # photo | voice
+    url: Mapped[str] = mapped_column(String(255), nullable=False)
+    lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    visit: Mapped["FieldVisit"] = relationship(back_populates="media")
+
+
+class Vehicle(Base):
+    __tablename__ = "vehicles"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(80), nullable=False)
+    plate: Mapped[str] = mapped_column(String(40), nullable=False)
+    kind: Mapped[str] = mapped_column(String(40), default="truck")
+    driver_name: Mapped[str | None] = mapped_column(String(120))
+    is_active: Mapped[bool] = mapped_column(Boolean, default=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class VehicleDay(Base):
+    __tablename__ = "vehicle_days"
+    __table_args__ = (UniqueConstraint("vehicle_id", "on_date"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    vehicle_id: Mapped[int] = mapped_column(ForeignKey("vehicles.id"), nullable=False)
+    on_date: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[str] = mapped_column(String(20), nullable=False)  # available | booked
+    notes: Mapped[str | None] = mapped_column(String(200))

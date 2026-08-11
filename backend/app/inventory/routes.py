@@ -1,11 +1,14 @@
+from decimal import Decimal
+
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.audit.service import write_audit
 from app.core.database import get_db
 from app.core.deps import AuthContext, require_perms
-from app.core.models import StockBalance, Warehouse
-from app.core.schemas import StockOut, StockSetIn, WarehouseOut
+from app.core.models import SalesOrder, SalesOrderLine, SalesOrderStatus, StockBalance, Warehouse
+from app.core.schemas import StockGlimpseOut, StockOut, StockSetIn, WarehouseOut
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -45,6 +48,32 @@ def list_warehouses(
         db.commit()
         return [wh]
     return rows
+
+
+@router.get("/glimpse", response_model=StockGlimpseOut)
+def stock_glimpse(
+    auth: AuthContext = Depends(require_perms("inventory.view")),
+    db: Session = Depends(get_db),
+):
+    """On hand vs already promised (draft orders). Headroom = what sales can still commit."""
+    company_id = auth.require_company()
+    on_hand = db.query(func.coalesce(func.sum(StockBalance.quantity), 0)).filter(
+        StockBalance.company_id == company_id,
+        StockBalance.organization_id == auth.organization_id,
+    ).scalar()
+    booked = (
+        db.query(func.coalesce(func.sum(SalesOrderLine.quantity), 0))
+        .join(SalesOrder, SalesOrderLine.sales_order_id == SalesOrder.id)
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.organization_id == auth.organization_id,
+            SalesOrder.status == SalesOrderStatus.DRAFT,
+        )
+        .scalar()
+    )
+    on_hand_d = Decimal(str(on_hand or 0))
+    booked_d = Decimal(str(booked or 0))
+    return StockGlimpseOut(on_hand=on_hand_d, booked=booked_d, headroom=on_hand_d - booked_d)
 
 
 @router.get("/stock", response_model=list[StockOut])

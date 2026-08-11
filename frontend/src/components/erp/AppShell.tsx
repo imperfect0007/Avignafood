@@ -122,29 +122,11 @@ const navByRole: Record<string, NavSection[]> = {
     },
   ],
   sales: [
-    { group: "Overview", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
     {
-      group: "Sell",
+      group: "Field",
       items: [
-        { to: "/leads", label: "Leads", icon: Sparkles },
-        { to: "/customers", label: "Customers", icon: Users },
-        { to: "/sales", label: "Sales & approvals", icon: Handshake },
-        { to: "/field", label: "Field visits", icon: MapPin },
-      ],
-    },
-    {
-      group: "Operate",
-      items: [
-        { to: "/inventory", label: "Inventory", icon: Boxes },
-        { to: "/dispatch", label: "Dispatch", icon: Truck },
-      ],
-    },
-    {
-      group: "Money",
-      items: [
-        { to: "/invoices", label: "Invoices", icon: ReceiptText },
-        { to: "/receivables", label: "Receivables", icon: Wallet },
-        { to: "/analytics", label: "Analytics", icon: BarChart3 },
+        { to: "/", label: "Today", icon: LayoutDashboard },
+        { to: "/field", label: "Visit", icon: MapPin },
       ],
     },
   ],
@@ -295,11 +277,11 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, [canApprove, items.length]);
 
   const role = me?.user.role || "";
-  const roleLabel = role.replaceAll("_", " ") || (loading ? "…" : "Owner");
-  // Unknown role → dashboard only (never fall through to ownerNav)
+  const roleLabel = role.replaceAll("_", " ") || (loading ? "…" : "Signed in");
+  // Unknown / loading → dashboard only (never fall through to owner/admin nav)
   const activeNav =
     navByRole[role] ??
-    (role ? [{ group: "Overview", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] }] : ownerNav);
+    [{ group: "Overview", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] }];
   const flat = flattenNav(activeNav);
   const bottomTabs = flat.slice(0, 4);
 
@@ -309,6 +291,54 @@ export function AppShell({ children }: { children: ReactNode }) {
     if (pathname === "/login") return;
     if (!pathAllowed(pathname, activeNav)) navigate({ to: "/" });
   }, [loading, me, pathname, activeNav, navigate]);
+
+  if (loading) {
+    return <div className="min-h-dvh bg-background" />;
+  }
+
+  if (role === "sales") {
+    return (
+      <div className="min-h-dvh bg-background">
+        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
+          <div className="min-w-0 flex-1">
+            <p className="truncate text-base font-semibold">{me?.user.full_name || "Sales"}</p>
+            <p className="text-xs text-muted-foreground">On-site · phone</p>
+          </div>
+          <button
+            type="button"
+            className="rounded-xl border border-border px-3 py-2 text-sm"
+            onClick={() => {
+              clearAuth();
+              navigate({ to: "/login" });
+            }}
+          >
+            Log out
+          </button>
+        </header>
+        <main className="mx-auto max-w-md px-4 py-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))]">
+          {children}
+        </main>
+        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-3 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+          {flattenNav(activeNav).map((item) => {
+            const active = pathname === item.to;
+            return (
+              <Link
+                key={item.to}
+                to={item.to}
+                className={cn(
+                  "flex min-h-16 flex-col items-center justify-center gap-1 text-xs",
+                  active ? "font-semibold text-primary" : "text-muted-foreground",
+                )}
+              >
+                <item.icon className="size-6" />
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+      </div>
+    );
+  }
 
   const sidebar = (
     <div className="flex h-full flex-col gap-5 overflow-y-auto bg-sidebar px-3 py-4 transition-colors duration-300 sm:px-4 sm:py-5 sm:gap-6">

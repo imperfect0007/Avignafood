@@ -149,6 +149,7 @@ class CustomerOut(ORMModel):
 # ---- Leads ----
 class LeadCreate(BaseModel):
     business_name: str
+    company_id: int | None = None
     contact_person: str | None = None
     phone: str | None = None
     email: str | None = None
@@ -160,6 +161,7 @@ class LeadCreate(BaseModel):
     estimated_value: Decimal | None = None
     assigned_to_id: int | None = None
     notes: str | None = None
+    voice_url: str | None = None
 
 
 class LeadUpdate(BaseModel):
@@ -197,6 +199,7 @@ class LeadOut(ORMModel):
     notes: str | None
     lost_reason: str | None
     customer_id: int | None
+    voice_url: str | None = None
 
 
 # ---- Products ----
@@ -383,3 +386,90 @@ class LogisticsDashboardOut(BaseModel):
     today_dispatches: int
     delivered_today: int
     confirmed_orders: int
+
+
+class VisitMediaIn(BaseModel):
+    url: str
+    kind: str = "photo"
+    lat: float | None = None
+    lng: float | None = None
+
+
+class VisitCreate(BaseModel):
+    company_id: int
+    client_kind: str = "new"  # existing | new
+    customer_id: int | None = None
+    site_name: str
+    contact_person: str | None = None
+    phone: str | None = None
+    notes: str | None = None
+    voice_url: str | None = None
+    lat: float | None = None
+    lng: float | None = None
+    accuracy_m: float | None = None
+    photos: list[VisitMediaIn] = []
+
+
+class StockGlimpseOut(BaseModel):
+    on_hand: Decimal
+    booked: Decimal
+    headroom: Decimal
+    unit: str = "KG"
+
+
+class VehicleOut(ORMModel):
+    id: int
+    name: str
+    plate: str
+    kind: str
+    driver_name: str | None = None
+    is_active: bool
+
+
+class VehicleDayOut(BaseModel):
+    vehicle_id: int
+    name: str
+    plate: str
+    kind: str
+    driver_name: str | None = None
+    status: str  # available | booked | unmarked
+    notes: str | None = None
+
+
+class VehicleDaySet(BaseModel):
+    on_date: date
+    status: str
+    notes: str | None = None
+
+
+class VehicleCreate(BaseModel):
+    name: str
+    plate: str
+    kind: str = "truck"
+
+
+class VisitMediaOut(ORMModel):
+    id: int
+    kind: str
+    url: str
+    lat: Decimal | None
+    lng: Decimal | None
+
+
+class VisitOut(ORMModel):
+    id: int
+    company_id: int
+    user_id: int
+    lead_id: int | None
+    customer_id: int | None = None
+    sales_order_id: int | None = None
+    site_name: str
+    contact_person: str | None
+    phone: str | None
+    notes: str | None
+    voice_url: str | None
+    lat: Decimal | None
+    lng: Decimal | None
+    accuracy_m: Decimal | None
+    checked_in_at: datetime
+    media: list[VisitMediaOut] = []

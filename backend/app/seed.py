@@ -48,6 +48,10 @@ PERMISSIONS = [
     ("payments.view", "View payments"),
     ("payments.create", "Create payments"),
     ("audit.view", "View audit logs"),
+    ("visits.view", "View field visits"),
+    ("visits.create", "Log field visits"),
+    ("vehicles.view", "View vehicle availability"),
+    ("vehicles.edit", "Set vehicle availability"),
 ]
 
 # Granular VIEW/CREATE/EDIT/APPROVE — menus hide modules; APIs enforce these codes.
@@ -78,9 +82,12 @@ ROLE_PERMS: dict[RoleName, list[str] | str] = {
         "invoices.view",
         "payments.view",
         "audit.view",
+        "visits.view",
+        "visits.create",
+        "vehicles.view",
+        "vehicles.edit",
     ],
     RoleName.SALES: [
-        # own pipeline + view inventory/invoices; no approve, no admin, no inventory.edit
         "dashboard.view",
         "companies.view",
         "customers.view",
@@ -88,16 +95,9 @@ ROLE_PERMS: dict[RoleName, list[str] | str] = {
         "leads.view",
         "leads.create",
         "leads.edit",
-        "products.view",
-        "inventory.view",
-        "quotations.view",
-        "quotations.create",
-        "quotations.edit",
-        "sales.view",
-        "sales.create",
-        "sales.edit",
-        "invoices.view",
-        "payments.view",
+        "visits.view",
+        "visits.create",
+        "vehicles.view",
     ],
     RoleName.ACCOUNTANT: [
         # money full; ops view; no field visits / inventory.edit / admin
@@ -124,6 +124,8 @@ ROLE_PERMS: dict[RoleName, list[str] | str] = {
         "products.view",
         "sales.view",
         "invoices.view",
+        "vehicles.view",
+        "vehicles.edit",
     ],
     # ponytail: WAREHOUSE role removed — Supervisor owns warehouse; enum kept for old DB rows
 }
@@ -157,7 +159,7 @@ COMPANY_BRANDING = [
 ]
 
 
-def _ensure_logo_column() -> None:
+def _ensure_column(table: str, column: str, ddl: str) -> None:
     # ponytail: create_all won't add columns to existing tables
     from sqlalchemy import text
 
@@ -165,11 +167,20 @@ def _ensure_logo_column() -> None:
         exists = conn.execute(
             text(
                 "SELECT 1 FROM information_schema.columns "
-                "WHERE table_name = 'companies' AND column_name = 'logo_url'"
-            )
+                "WHERE table_name = :table AND column_name = :column"
+            ),
+            {"table": table, "column": column},
         ).scalar()
         if not exists:
-            conn.execute(text("ALTER TABLE companies ADD COLUMN logo_url VARCHAR(255)"))
+            conn.execute(text(ddl))
+
+
+def _ensure_logo_column() -> None:
+    _ensure_column("companies", "logo_url", "ALTER TABLE companies ADD COLUMN logo_url VARCHAR(255)")
+    _ensure_column("leads", "voice_url", "ALTER TABLE leads ADD COLUMN voice_url VARCHAR(255)")
+    _ensure_column("field_visits", "customer_id", "ALTER TABLE field_visits ADD COLUMN customer_id INTEGER")
+    _ensure_column("field_visits", "sales_order_id", "ALTER TABLE field_visits ADD COLUMN sales_order_id INTEGER")
+    _ensure_column("vehicles", "driver_name", "ALTER TABLE vehicles ADD COLUMN driver_name VARCHAR(120)")
 
 
 def _sync_company_branding(db) -> None:
@@ -239,6 +250,64 @@ def _sync_role_user(
     db.commit()
 
 
+def _sync_vehicles(db) -> None:
+    from app.core.models import Organization, Vehicle
+
+    org = db.query(Organization).first()
+    if not org:
+        return
+    keep = (
+        db.query(Vehicle)
+        .filter(Vehicle.organization_id == org.id, Vehicle.plate == "KA-01-AB-4421")
+        .first()
+    )
+    if not keep:
+        keep = db.query(Vehicle).filter(Vehicle.organization_id == org.id).order_by(Vehicle.id).first()
+    if not keep:
+        keep = Vehicle(
+            organization_id=org.id,
+            name="Tata 1109",
+            plate="KA-01-AB-4421",
+            kind="truck",
+            driver_name="Ravi Kumar",
+        )
+        db.add(keep)
+        db.flush()
+    keep.name = "Tata 1109"
+    keep.plate = "KA-01-AB-4421"
+    keep.kind = "truck"
+    keep.driver_name = "Ravi Kumar"
+    keep.is_active = True
+    for extra in db.query(Vehicle).filter(Vehicle.organization_id == org.id, Vehicle.id != keep.id).all():
+        extra.is_active = False
+    db.commit()
+    print("Fleet set to 1 vehicle / 1 driver")
+
+
+def _sync_demo_customers(db) -> None:
+    from app.core.models import Company, Customer
+
+    samples = [
+        ("Anand Bakers Pvt Ltd", "Ramesh Anand", "9845011122"),
+        ("Gokul Beverages", "Vinay T.", "9845022233"),
+        ("Medisyn Formulations", "Neha S.", "9845033344"),
+    ]
+    for company in db.query(Company).order_by(Company.id).all():
+        if db.query(Customer).filter(Customer.company_id == company.id).first():
+            continue
+        for name, contact, phone in samples:
+            db.add(
+                Customer(
+                    organization_id=company.organization_id,
+                    company_id=company.id,
+                    name=name,
+                    contact_person=contact,
+                    phone=phone,
+                )
+            )
+    db.commit()
+
+
 def seed() -> None:
     Base.metadata.create_all(bind=engine)
     _ensure_logo_column()
@@ -274,6 +343,8 @@ def seed() -> None:
                 full_name="Logistics",
                 password="logistics123",
             )
+            _sync_vehicles(db)
+            _sync_demo_customers(db)
             print("Seed skipped: already initialized (branding + role users refreshed)")
             return
 
@@ -391,6 +462,7 @@ def seed() -> None:
             db.add(UserCompany(user_id=logistics.id, company_id=c.id))
 
         db.commit()
+        _sync_vehicles(db)
         print(
             "Seed complete: admin@avighnya.local / admin123 · "
             "accounts@avighnya.local / accounts123 · "

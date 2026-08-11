@@ -4,6 +4,7 @@ import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
 import { greeting } from "@/lib/format";
 import { Badge, Kpi, PageHeader, Panel } from "@/components/erp/ui-bits";
+import { VehicleEditor } from "@/components/erp/VehicleBoard";
 
 type LogisticsDash = {
   pending_dispatches: number;
@@ -45,6 +46,10 @@ export function LogisticsDashboard() {
         <Kpi label="Ready for dispatch" value={data ? String(data.ready_for_dispatch) : "—"} />
         <Kpi label="Today's dispatches" value={data ? String(data.today_dispatches) : "—"} />
         <Kpi label="Delivered today" value={data ? String(data.delivered_today) : "—"} tone="good" />
+      </div>
+
+      <div className="mt-6">
+        <VehicleEditor />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">

@@ -1,7 +1,8 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company-context";
+import { useMe } from "@/lib/me-context";
 import { byFirm, firms, inr, leads as mockLeads } from "@/lib/erp-data";
 import { Badge, PageHeader } from "@/components/erp/ui-bits";
 import { cn } from "@/lib/utils";
@@ -120,7 +121,21 @@ function apiAsRows(rows: ApiLead[]): LeadRow[] {
 const inputCls =
   "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
 
+function SalesGoesToVisit() {
+  const navigate = useNavigate();
+  useEffect(() => {
+    navigate({ to: "/field" });
+  }, [navigate]);
+  return null;
+}
+
 function Leads() {
+  const { me } = useMe();
+  if (me?.user.role === "sales") return <SalesGoesToVisit />;
+  return <LeadsDesk />;
+}
+
+function LeadsDesk() {
   const { firm } = useCompany();
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [q, setQ] = useState("");

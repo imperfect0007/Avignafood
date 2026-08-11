@@ -1,6 +1,6 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import { firms, type FirmId } from "./erp-data";
-import { getCompanyId } from "./api";
+import { getCompanyId, onAuthChange } from "./api";
 import { applyBrand } from "./brand";
 
 const Ctx = createContext<{ firm: FirmId; setFirm: (f: FirmId) => void }>({
@@ -19,9 +19,13 @@ export function CompanyProvider({ children }: { children: ReactNode }) {
   const [firm, setFirmState] = useState<FirmId>("f1");
 
   useEffect(() => {
-    const f = firmFromStorage();
-    setFirmState(f);
-    applyBrand(f);
+    const sync = () => {
+      const f = firmFromStorage();
+      setFirmState(f);
+      applyBrand(f);
+    };
+    sync();
+    return onAuthChange(sync);
   }, []);
 
   useEffect(() => {
