@@ -1,0 +1,1304 @@
+Yes. For Avighnya Foods, the **flow is actually more important than just the feature list**, because this is a transaction-heavy B2B distribution system. The system should connect **Lead → Customer → Sales → Inventory → Dispatch → Invoice → Payment → Analytics**.
+
+# Avighnya Foods — Complete System Flow
+
+## 1. Overall Business Flow
+
+```text
+                         AVIGHNYA FOODS
+                               │
+                               ▼
+                         LEAD / ENQUIRY
+                               │
+                               ▼
+                        LEAD QUALIFICATION
+                               │
+                 ┌─────────────┴─────────────┐
+                 │                           │
+              RETAIL                     WHOLESALE
+                 │                           │
+                 ▼                           ▼
+          Mark / Reject              SALES FOLLOW-UP
+                                             │
+                                             ▼
+                                      CUSTOMER VISIT
+                                             │
+                                             ▼
+                                      REQUIREMENT
+                                             │
+                                             ▼
+                                      QUOTATION
+                                             │
+                                             ▼
+                                      PRICE CHECK
+                                             │
+                              ┌──────────────┴──────────────┐
+                              │                             │
+                         Within Limit                 Below Limit
+                              │                             │
+                              │                             ▼
+                              │                       OWNER APPROVAL
+                              │                             │
+                              │                    ┌────────┴────────┐
+                              │                    │                 │
+                              │                 APPROVE            REJECT
+                              │                    │                 │
+                              └────────────────────┘                 │
+                                           │                         │
+                                           ▼                         ▼
+                                      SALES ORDER                Rework
+                                           │
+                                           ▼
+                                     CREDIT CHECK
+                                           │
+                             ┌─────────────┴─────────────┐
+                             │                           │
+                       Credit Available            Credit Exceeded
+                             │                           │
+                             │                           ▼
+                             │                    Approval Required
+                             │                           │
+                             └─────────────┬─────────────┘
+                                           ▼
+                                     STOCK CHECK
+                                           │
+                             ┌─────────────┴─────────────┐
+                             │                           │
+                       Stock Available              Stock Short
+                             │                           │
+                             │                           ▼
+                             │                    Purchase Request
+                             │                           │
+                             │                           ▼
+                             │                    Purchase Order
+                             │                           │
+                             │                           ▼
+                             │                    Goods Received
+                             │                           │
+                             │                           ▼
+                             └────────────────── Stock Updated
+                                           │
+                                           ▼
+                                     STOCK RESERVATION
+                                           │
+                                           ▼
+                                      DISPATCH
+                                           │
+                                           ▼
+                                  DELIVERY CONFIRMATION
+                                           │
+                                           ▼
+                                       INVOICE
+                                           │
+                                           ▼
+                                    CREDIT PERIOD
+                                           │
+                                           ▼
+                                   PAYMENT REMINDER
+                                           │
+                                           ▼
+                                     PAYMENT RECEIVED
+                                           │
+                                           ▼
+                                     RECEIVABLE CLOSED
+                                           │
+                                           ▼
+                                      ANALYTICS
+```
+
+---
+
+# 2. Lead-to-Customer Flow
+
+## Step 1 — Lead Creation
+
+Lead can originate from:
+
+```text
+WhatsApp
+Phone
+Website
+Referral
+Salesperson
+Existing customer
+Other
+```
+
+Flow:
+
+```text
+Lead Created
+     ↓
+Lead Information Captured
+     ↓
+Retail / Wholesale Classification
+     ↓
+Assign Salesperson
+```
+
+---
+
+## Step 2 — Lead Qualification
+
+Salesperson sees:
+
+```text
+Company
+Contact
+Location
+Required Product
+Quantity
+Frequency
+Expected Value
+```
+
+Then:
+
+```text
+Qualified?
+   │
+ ┌─┴───────────┐
+NO             YES
+│               │
+Lost            Opportunity
+                │
+                ▼
+             Follow-up
+```
+
+---
+
+# 3. Lead → Customer Flow
+
+When the lead becomes a genuine business opportunity:
+
+```text
+Lead
+ ↓
+Qualified
+ ↓
+Opportunity
+ ↓
+Quotation
+ ↓
+Negotiation
+ ↓
+Won
+ ↓
+Customer Created
+```
+
+The system should **not create duplicate customer records** if the customer already exists.
+
+---
+
+# 4. Customer Onboarding Flow
+
+```text
+Create Customer
+      ↓
+Basic Details
+      ↓
+GST / PAN
+      ↓
+Contacts
+      ↓
+Billing Address
+      ↓
+Shipping Address
+      ↓
+Credit Limit
+      ↓
+Credit Days
+      ↓
+Payment Terms
+      ↓
+Assign Salesperson
+      ↓
+Customer Activated
+```
+
+If approval is required:
+
+```text
+Customer Created
+      ↓
+Approval
+      ↓
+Active
+```
+
+---
+
+# 5. Customer Visit Flow
+
+For field sales:
+
+```text
+Salesperson
+     ↓
+Open Mobile Dashboard
+     ↓
+Select Customer
+     ↓
+Check-In
+     ↓
+GPS Captured
+     ↓
+Customer Discussion
+     ↓
+Requirement Recorded
+     ↓
+Photo / Voice Note
+     ↓
+Quotation / Requirement
+     ↓
+Next Follow-up
+     ↓
+Check-Out
+```
+
+The activity gets added to the customer timeline.
+
+---
+
+# 6. Quotation Flow
+
+```text
+Customer
+   ↓
+Create Quotation
+   ↓
+Select Products
+   ↓
+Enter Quantity
+   ↓
+System Fetches Price
+   ↓
+Discount / Negotiation
+   ↓
+Price Validation
+```
+
+Then:
+
+```text
+Is price acceptable?
+      │
+ ┌────┴─────┐
+YES         NO
+ │           │
+ │           ▼
+ │       Approval
+ │           │
+ │     ┌─────┴─────┐
+ │     │           │
+ │  Approved     Rejected
+ │     │           │
+ └─────┘           ▼
+               Modify Price
+```
+
+Then:
+
+```text
+Quotation Approved
+       ↓
+Send to Customer
+       ↓
+Customer Accepts
+       ↓
+Sales Order
+```
+
+---
+
+# 7. Sales Order Flow
+
+```text
+Quotation
+    ↓
+Convert to Sales Order
+    ↓
+Validate Customer
+    ↓
+Validate Credit
+    ↓
+Check Stock
+```
+
+### Credit Check
+
+```text
+Outstanding + New Order
+          │
+          ▼
+   Credit Limit Check
+          │
+     ┌────┴─────┐
+     │          │
+    PASS      FAIL
+     │          │
+     │          ▼
+     │       Approval
+     │          │
+     └──────────┘
+          │
+          ▼
+      Order Confirmed
+```
+
+---
+
+# 8. Inventory Flow
+
+Once the order is confirmed:
+
+```text
+Sales Order
+     ↓
+Stock Availability Check
+     ↓
+Reserve Stock
+```
+
+Example:
+
+```text
+Available Stock = 1,000 KG
+Order = 200 KG
+
+After Reservation:
+
+Available = 800 KG
+Reserved  = 200 KG
+```
+
+---
+
+# 9. If Stock Is Not Available
+
+```text
+Sales Order
+     ↓
+Stock Check
+     ↓
+Insufficient Stock
+     ↓
+Purchase Requirement
+     ↓
+Purchase Order
+     ↓
+Supplier
+     ↓
+Goods Received
+     ↓
+Batch Created
+     ↓
+Warehouse Stock Updated
+     ↓
+Sales Order Allocation
+```
+
+---
+
+# 10. Purchase Flow
+
+```text
+Low Stock / Sales Requirement
+          ↓
+Purchase Requirement
+          ↓
+Purchase Order
+          ↓
+Supplier
+          ↓
+Goods Delivered
+          ↓
+Goods Receipt
+          ↓
+Quantity Verification
+          ↓
+Batch Verification
+          ↓
+Quality / Damage Check
+          ↓
+Stock Inward
+          ↓
+Inventory Updated
+```
+
+---
+
+# 11. Batch Flow
+
+For each received batch:
+
+```text
+Goods Receipt
+      ↓
+Batch Number
+      ↓
+Manufacturing Date
+      ↓
+Expiry Date
+      ↓
+Quantity
+      ↓
+Warehouse
+      ↓
+Stock Created
+```
+
+Later:
+
+```text
+Batch
+ ↓
+Sales Allocation
+ ↓
+Dispatch
+ ↓
+Customer
+```
+
+This provides traceability.
+
+---
+
+# 12. Warehouse Flow
+
+```text
+Sales Order
+     ↓
+Stock Reservation
+     ↓
+Pick List
+     ↓
+Warehouse Staff
+     ↓
+Pick Product
+     ↓
+Verify Batch
+     ↓
+Verify Quantity
+     ↓
+Pack
+     ↓
+Ready for Dispatch
+```
+
+---
+
+# 13. Dispatch Flow
+
+```text
+Order Ready
+    ↓
+Dispatch Planning
+    ↓
+Select Warehouse
+    ↓
+Select Vehicle
+    ↓
+Assign Driver
+    ↓
+Select Transport Agency
+    ↓
+Prepare Dispatch
+    ↓
+Stock Outward
+    ↓
+Dispatched
+    ↓
+In Transit
+    ↓
+Delivered
+```
+
+---
+
+# 14. Delivery Flow
+
+```text
+Vehicle
+   ↓
+Customer Location
+   ↓
+Delivery
+   ↓
+Receiver Confirmation
+   ↓
+Signature / Photo
+   ↓
+Proof of Delivery
+   ↓
+Order Completed
+```
+
+---
+
+# 15. Invoice Flow
+
+Depending on the company's accounting process:
+
+```text
+Sales Order
+     ↓
+Dispatch
+     ↓
+Delivery / Dispatch Confirmation
+     ↓
+Generate Invoice
+     ↓
+GST Calculation
+     ↓
+Invoice Number
+     ↓
+Generate PDF
+     ↓
+Save Invoice
+     ↓
+Send Customer
+```
+
+---
+
+# 16. Payment Flow
+
+```text
+Invoice
+   ↓
+Credit Days
+   ↓
+Due Date
+   ↓
+Payment Reminder
+   ↓
+Payment Received
+   ↓
+Payment Entry
+   ↓
+Allocate Payment to Invoice
+   ↓
+Outstanding Updated
+```
+
+Example:
+
+```text
+Invoice = ₹1,00,000
+Payment = ₹60,000
+
+Outstanding = ₹40,000
+```
+
+Then:
+
+```text
+₹40,000 Payment
+      ↓
+Outstanding = ₹0
+      ↓
+Invoice = PAID
+```
+
+---
+
+# 17. Overdue Flow
+
+```text
+Invoice
+   ↓
+Due Date
+   ↓
+Payment Not Received
+   ↓
+OVERDUE
+   ↓
+Calculate Days Overdue
+   ↓
+Calculate Loss / Interest
+   ↓
+Send Reminder
+   ↓
+Escalate
+```
+
+Example:
+
+```text
+Due Date: 1 Aug
+Today: 11 Aug
+
+Days Overdue = 10
+```
+
+---
+
+# 18. Credit Control Flow
+
+Every new order can pass through:
+
+```text
+Customer
+   ↓
+Existing Outstanding
+   +
+New Order Value
+   ↓
+Total Exposure
+   ↓
+Compare with Credit Limit
+```
+
+Example:
+
+```text
+Credit Limit = ₹5,00,000
+
+Outstanding = ₹4,00,000
+New Order = ₹1,50,000
+
+Exposure = ₹5,50,000
+
+Credit exceeded
+       ↓
+Approval required
+```
+
+---
+
+# 19. Price Approval Flow
+
+```text
+Salesperson
+     ↓
+Enter Selling Price
+     ↓
+System Checks Minimum Price
+     ↓
+        ┌───────────────┐
+        │               │
+     Valid          Below Limit
+        │               │
+        │               ▼
+        │          Approval Request
+        │               │
+        │         Owner/Supervisor
+        │               │
+        │        ┌──────┴──────┐
+        │        │             │
+        │     Approve        Reject
+        │        │             │
+        └────────┘             ▼
+                           Revise Price
+```
+
+---
+
+# 20. Return Flow
+
+A complete system should also support returns.
+
+### Customer Return
+
+```text
+Customer
+   ↓
+Return Request
+   ↓
+Reason
+   ↓
+Approval
+   ↓
+Goods Received
+   ↓
+Quality Check
+   ↓
+Batch Verification
+   ↓
+Stock Inward
+   ↓
+Credit Note
+```
+
+---
+
+# 21. Purchase Return Flow
+
+```text
+Warehouse
+   ↓
+Damaged / Incorrect Goods
+   ↓
+Purchase Return
+   ↓
+Supplier
+   ↓
+Goods Returned
+   ↓
+Stock Reduced
+   ↓
+Debit Note / Supplier Adjustment
+```
+
+---
+
+# 22. Notification Flow
+
+The notification engine works in the background.
+
+Example:
+
+```text
+Event
+ ↓
+Business Rule
+ ↓
+Notification Queue
+ ↓
+Worker
+ ↓
+Notification Channel
+```
+
+Example:
+
+```text
+Invoice Due Tomorrow
+       ↓
+Notification
+       ↓
+WhatsApp + Email + In-App
+```
+
+---
+
+# 23. Dashboard Data Flow
+
+The dashboard should not calculate everything in the frontend.
+
+```text
+Database
+   ↓
+Backend Services
+   ↓
+Analytics Queries
+   ↓
+API
+   ↓
+Dashboard
+```
+
+Example:
+
+```text
+PostgreSQL
+    ↓
+Monthly Sales Query
+    ↓
+₹42.6 Lakh
+    ↓
+Frontend
+    ↓
+Sales Chart
+```
+
+---
+
+# 24. Reporting Flow
+
+```text
+User
+ ↓
+Select Report
+ ↓
+Apply Filters
+ ↓
+Company
+ ↓
+Date Range
+ ↓
+Customer / Product / Salesperson
+ ↓
+Generate Report
+ ↓
+Display
+ ↓
+Export
+ ├── Excel
+ ├── CSV
+ └── PDF
+```
+
+---
+
+# 25. Excel Import Flow
+
+This is especially important because the current business uses Excel.
+
+```text
+Excel Upload
+     ↓
+File Validation
+     ↓
+Column Validation
+     ↓
+Data Validation
+     ↓
+Duplicate Detection
+     ↓
+Error Detection
+     ↓
+Preview
+     ↓
+User Confirmation
+     ↓
+Import
+     ↓
+Database
+     ↓
+Audit Log
+```
+
+Example:
+
+```text
+1,000 Records
+
+960 Valid
+25 Duplicate
+15 Invalid
+
+       ↓
+
+User fixes / confirms
+
+       ↓
+
+Import Valid Records
+```
+
+---
+
+# 26. Audit Flow
+
+Any sensitive action:
+
+```text
+User Action
+     ↓
+Permission Check
+     ↓
+Business Logic
+     ↓
+Database Update
+     ↓
+Audit Log
+```
+
+Example:
+
+```text
+Supervisor changes credit limit
+             ↓
+Authorization
+             ↓
+Credit limit updated
+             ↓
+Audit record created
+```
+
+---
+
+# 27. User Permission Flow
+
+Every request follows:
+
+```text
+User
+ ↓
+Authentication
+ ↓
+Identify User
+ ↓
+Identify Role
+ ↓
+Identify Company
+ ↓
+Check Permission
+ ↓
+Business Rule
+ ↓
+Database
+ ↓
+Response
+```
+
+This prevents a salesperson from accessing information belonging to another company or restricted financial information.
+
+---
+
+# 28. Multi-Company Flow
+
+Owner logs in:
+
+```text
+Organization
+      │
+      ├── Company A
+      ├── Company B
+      ├── Company C
+      └── Company D
+```
+
+Owner selects:
+
+```text
+Company B
+```
+
+Then:
+
+```text
+Dashboard
+ ↓
+Customers → Company B
+Products → Company B
+Inventory → Company B
+Sales → Company B
+Invoices → Company B
+Reports → Company B
+```
+
+If the owner selects:
+
+```text
+All Companies
+```
+
+the system generates consolidated data.
+
+---
+
+# 29. Data Flow Between Modules
+
+The important relationships are:
+
+```text
+CRM
+ │
+ ▼
+Customer
+ │
+ ▼
+Quotation
+ │
+ ▼
+Sales Order
+ │
+ ├──────────────► Credit Check
+ │
+ └──────────────► Inventory Check
+                         │
+                  ┌──────┴──────┐
+                  │             │
+              Available      Shortage
+                  │             │
+                  │             ▼
+                  │         Purchase
+                  │             │
+                  │             ▼
+                  │        Goods Receipt
+                  │             │
+                  └──────► Inventory
+                                │
+                                ▼
+                            Dispatch
+                                │
+                                ▼
+                             Invoice
+                                │
+                                ▼
+                            Receivable
+                                │
+                                ▼
+                             Payment
+                                │
+                                ▼
+                           Analytics
+```
+
+---
+
+# 30. Technical Deployment Flow
+
+The development/deployment side works separately:
+
+```text
+Developer
+    ↓
+Code
+    ↓
+Git
+    ↓
+GitHub
+    ↓
+Pull Request
+    ↓
+Code Review
+    ↓
+GitHub Actions
+    ↓
+Tests
+    ↓
+Docker Build
+    ↓
+Deploy
+    ↓
+VPS
+    ↓
+Docker Compose
+    ↓
+Nginx
+    ↓
+Production
+```
+
+---
+
+# 31. Production Request Flow
+
+When a salesperson opens the application:
+
+```text
+Mobile / Browser
+       ↓
+HTTPS
+       ↓
+Nginx
+       ↓
+Next.js
+       ↓
+API Request
+       ↓
+FastAPI
+       ↓
+Authentication
+       ↓
+Authorization
+       ↓
+Business Logic
+       ↓
+PostgreSQL
+       ↓
+Response
+       ↓
+Next.js
+       ↓
+User
+```
+
+---
+
+# 32. Background Job Flow
+
+For something like invoice generation:
+
+```text
+User clicks "Generate Invoice"
+             ↓
+FastAPI
+             ↓
+Create Invoice Record
+             ↓
+Add PDF Job to Redis
+             ↓
+Return Response
+             ↓
+User continues working
+             
+Meanwhile:
+
+Redis
+  ↓
+Worker
+  ↓
+Generate PDF
+  ↓
+Store File
+  ↓
+Update Invoice
+  ↓
+Send Email/WhatsApp
+```
+
+This prevents slow operations from blocking the user.
+
+---
+
+# 33. Complete End-to-End Example
+
+Let's take a real scenario.
+
+### Customer wants 500 KG of an ingredient.
+
+```text
+WhatsApp Enquiry
+       ↓
+Lead Created
+       ↓
+Wholesale Lead
+       ↓
+Salesperson Assigned
+       ↓
+Customer Contacted
+       ↓
+Customer Visit
+       ↓
+Requirement: 500 KG
+       ↓
+Quotation
+       ↓
+Negotiated Price
+       ↓
+Price Approval
+       ↓
+Quotation Accepted
+       ↓
+Sales Order
+       ↓
+Credit Check
+       ↓
+Stock Check
+       ↓
+500 KG Available
+       ↓
+Stock Reserved
+       ↓
+Warehouse Picking
+       ↓
+Batch Selected
+       ↓
+Packing
+       ↓
+Vehicle Assigned
+       ↓
+Dispatch
+       ↓
+Delivery
+       ↓
+Invoice Generated
+       ↓
+Customer Gets Invoice
+       ↓
+30-Day Credit Period
+       ↓
+Payment Reminder
+       ↓
+Payment Received
+       ↓
+Invoice Closed
+       ↓
+Customer Analytics Updated
+       ↓
+Salesperson Performance Updated
+       ↓
+Inventory Updated
+       ↓
+Financial Dashboard Updated
+```
+
+That is the **core business cycle** the software needs to automate.
+
+---
+
+# 34. The Complete System in One Picture
+
+```text
+                         ┌──────────────────┐
+                         │      LEADS       │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │      CRM         │
+                         │    CUSTOMERS     │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │     SALES        │
+                         │ QUOTATION / SO   │
+                         └────────┬─────────┘
+                                  │
+                    ┌─────────────┴─────────────┐
+                    ▼                           ▼
+             ┌──────────────┐            ┌──────────────┐
+             │ CREDIT CHECK │            │ STOCK CHECK  │
+             └──────┬───────┘            └──────┬───────┘
+                    │                           │
+                    │                     ┌─────┴─────┐
+                    │                     │           │
+                    │                  Available   Short
+                    │                     │           │
+                    │                     │           ▼
+                    │                     │        PURCHASE
+                    │                     │           │
+                    │                     │           ▼
+                    │                     │      GOODS RECEIPT
+                    │                     │           │
+                    │                     └─────┬─────┘
+                    │                           │
+                    └─────────────┬─────────────┘
+                                  ▼
+                         ┌──────────────────┐
+                         │    INVENTORY     │
+                         │  BATCH / STOCK   │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │     DISPATCH     │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │    DELIVERY      │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │     BILLING      │
+                         │     INVOICE      │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │   RECEIVABLES    │
+                         │ CREDIT / DUE     │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │    PAYMENT       │
+                         └────────┬─────────┘
+                                  │
+                                  ▼
+                         ┌──────────────────┐
+                         │    ANALYTICS     │
+                         │    REPORTS       │
+                         └──────────────────┘
+
+
+       ┌─────────────────────────────────────────────┐
+       │             CROSS-CUTTING SYSTEMS            │
+       │                                             │
+       │ Users & Roles │ Notifications │ Audit Logs │
+       │ Multi-Company │ Documents     │ Settings   │
+       │ Excel Import  │ Approvals     │ Automation │
+       └─────────────────────────────────────────────┘
+```
+
+**This should be the master flow for the entire Avighnya Foods application.** It gives you a direct mapping from each business activity to the software module, database transactions, approvals, inventory movement, financial transaction, and finally the management dashboard.

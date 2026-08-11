@@ -1,0 +1,1288 @@
+Yes. For the **Avighnya Foods system**, since you have decided on **VPS + GitHub**, here is a detailed **technical description** you can use as the technical section of the proposal.
+
+# Avighnya Foods — Technical Architecture & Technology Description
+
+## 1. Technology Architecture
+
+The Avighnya Foods platform will be developed as a **centralized, modular business management application** designed to manage CRM, sales, purchasing, inventory, dispatch, billing, receivables, reporting, and multi-company operations.
+
+The system will use a **modular monolithic architecture** initially. This provides the simplicity of a single application while keeping each business module logically separated so that individual services can be scaled or extracted later if required.
+
+### High-Level Architecture
+
+```text
+                         USERS
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+           Desktop                    Mobile
+              │                         │
+              └────────────┬────────────┘
+                           │
+                         HTTPS
+                           │
+                           ▼
+                    ┌─────────────┐
+                    │    NGINX    │
+                    │ Reverse     │
+                    │ Proxy       │
+                    └──────┬──────┘
+                           │
+              ┌────────────┴────────────┐
+              │                         │
+              ▼                         ▼
+        ┌─────────────┐          ┌─────────────┐
+        │  Next.js    │          │   FastAPI   │
+        │  Frontend   │◄────────►│   Backend   │
+        └─────────────┘          └──────┬──────┘
+                                        │
+                         ┌──────────────┼──────────────┐
+                         │              │              │
+                         ▼              ▼              ▼
+                    PostgreSQL       Redis          Worker
+                    Database         Cache          Service
+                         │                             │
+                         │                             ├── PDF
+                         │                             ├── Email
+                         │                             ├── WhatsApp
+                         │                             ├── Excel
+                         │                             └── Notifications
+                         │
+                         ▼
+                    File Storage
+```
+
+---
+
+# 2. Frontend Technology
+
+## Next.js + TypeScript
+
+The web application will be developed using **Next.js with TypeScript**.
+
+Next.js will provide the user-facing interface for:
+
+* CRM
+* Sales
+* Customer management
+* Inventory
+* Purchase
+* Dispatch
+* Billing
+* Receivables
+* Reports
+* Dashboards
+* User management
+* Multi-company management
+
+### Why Next.js?
+
+Next.js provides:
+
+* High-performance React application
+* Structured routing
+* Server-side capabilities
+* API integration
+* Good scalability
+* TypeScript support
+* Production-ready deployment
+* Responsive UI development
+
+The application will be designed to work on:
+
+```text
+Desktop
+Laptop
+Tablet
+Mobile Browser
+```
+
+The field sales interface can therefore be accessed from mobile devices without requiring a separate application in the first phase.
+
+---
+
+# 3. TypeScript
+
+TypeScript will be used instead of plain JavaScript for the frontend.
+
+It provides strong typing for:
+
+* Customer data
+* Product data
+* Invoice data
+* API responses
+* User permissions
+* Sales transactions
+* Inventory records
+
+For example:
+
+```text
+Customer
+ ├── id
+ ├── companyId
+ ├── name
+ ├── phone
+ ├── creditLimit
+ └── creditDays
+```
+
+This reduces frontend errors and makes the application easier to maintain as the system grows.
+
+---
+
+# 4. UI Technology
+
+The interface will use:
+
+* Tailwind CSS
+* Reusable UI components
+* Responsive layouts
+* Data tables
+* Charts
+* Forms
+* Modal dialogs
+* Notifications
+* Dashboard components
+
+The system will follow a consistent design system across all modules.
+
+For example:
+
+```text
+Dashboard
+CRM
+Sales
+Inventory
+Accounts
+Reports
+Settings
+```
+
+will use the same navigation, buttons, tables, filters, forms and interaction patterns.
+
+---
+
+# 5. Backend Technology
+
+## FastAPI + Python
+
+The backend will be developed using **FastAPI**.
+
+FastAPI will handle:
+
+* Authentication
+* Authorization
+* Business logic
+* CRM operations
+* Sales operations
+* Inventory transactions
+* Purchase operations
+* Billing
+* Payments
+* Credit management
+* Reports
+* Notifications
+* File uploads
+* Excel processing
+
+### Why FastAPI?
+
+FastAPI provides:
+
+* High performance
+* Strong Python ecosystem
+* Automatic API documentation
+* Type validation
+* Async support
+* Clean API architecture
+* Easy integration with background workers
+* Easy integration with data-processing libraries
+
+---
+
+# 6. Backend Architecture
+
+The backend should not be built as one large file.
+
+It will be organized by business domain.
+
+```text
+backend/
+│
+├── app/
+│
+│   ├── auth/
+│   ├── users/
+│   ├── companies/
+│   ├── customers/
+│   ├── leads/
+│   ├── products/
+│   ├── suppliers/
+│   ├── purchases/
+│   ├── inventory/
+│   ├── sales/
+│   ├── quotations/
+│   ├── dispatch/
+│   ├── invoices/
+│   ├── payments/
+│   ├── receivables/
+│   ├── reports/
+│   ├── notifications/
+│   ├── files/
+│   └── audit/
+```
+
+Each module will contain its own:
+
+```text
+Routes
+Schemas
+Services
+Database operations
+Business rules
+Validators
+```
+
+This makes the application easier to maintain.
+
+---
+
+# 7. REST API
+
+The frontend and backend will communicate through REST APIs.
+
+Example:
+
+```text
+GET    /api/v1/customers
+POST   /api/v1/customers
+GET    /api/v1/customers/{id}
+PUT    /api/v1/customers/{id}
+DELETE /api/v1/customers/{id}
+```
+
+Sales:
+
+```text
+GET    /api/v1/sales/orders
+POST   /api/v1/sales/orders
+GET    /api/v1/sales/orders/{id}
+PUT    /api/v1/sales/orders/{id}
+```
+
+Inventory:
+
+```text
+GET    /api/v1/inventory/stock
+GET    /api/v1/inventory/batches
+POST   /api/v1/inventory/adjustments
+POST   /api/v1/inventory/transfers
+```
+
+Invoices:
+
+```text
+POST   /api/v1/invoices
+GET    /api/v1/invoices
+GET    /api/v1/invoices/{id}
+GET    /api/v1/invoices/{id}/pdf
+```
+
+The APIs will use versioning:
+
+```text
+/api/v1/
+```
+
+This allows future API versions to be introduced without breaking the existing application.
+
+---
+
+# 8. PostgreSQL Database
+
+The primary database will be **PostgreSQL**.
+
+PostgreSQL will store transactional business data including:
+
+* Companies
+* Users
+* Customers
+* Suppliers
+* Products
+* Warehouses
+* Batches
+* Leads
+* Quotations
+* Sales orders
+* Purchases
+* Inventory transactions
+* Dispatches
+* Invoices
+* Payments
+* Receivables
+* Approvals
+* Notifications
+* Audit logs
+
+---
+
+# 9. Multi-Company Database Architecture
+
+The system will support **four business firms under one organization**.
+
+The database will therefore use a company-level data isolation model.
+
+Example:
+
+```text
+Organization
+│
+├── Company A
+│   ├── Customers
+│   ├── Products
+│   ├── Inventory
+│   └── Invoices
+│
+├── Company B
+│
+├── Company C
+│
+└── Company D
+```
+
+Major transactional tables will contain:
+
+```text
+organization_id
+company_id
+```
+
+This allows the owner to:
+
+* Switch between companies
+* View individual company reports
+* View consolidated reports
+* Compare companies
+* Control company-level access
+
+The backend will always verify that the logged-in user has permission to access the selected company.
+
+---
+
+# 10. Database ORM
+
+The backend can use **SQLAlchemy 2.x** as the ORM with **Alembic** for database migrations.
+
+This allows developers to define database models such as:
+
+```text
+Customer
+Product
+Invoice
+Payment
+Warehouse
+InventoryTransaction
+```
+
+while maintaining proper database relationships.
+
+Alembic will manage schema changes between versions.
+
+Example:
+
+```text
+Version 1
+   ↓
+Version 2
+   ↓
+Version 3
+   ↓
+Production
+```
+
+This is safer than manually modifying production tables.
+
+---
+
+# 11. Redis
+
+**Redis** will be used for fast temporary data and application coordination.
+
+Potential uses include:
+
+* Caching
+* Session-related data
+* Rate limiting
+* Temporary OTPs
+* Background job queues
+* Notification queues
+* Frequently accessed dashboard data
+
+For example:
+
+```text
+User requests dashboard
+        ↓
+Check Redis
+        ↓
+Data available?
+   ┌────┴────┐
+  YES       NO
+   │         │
+Return    PostgreSQL
+            │
+            ▼
+          Redis
+```
+
+This reduces unnecessary database queries.
+
+---
+
+# 12. Background Worker
+
+Certain operations should not run directly during the user's request.
+
+A background worker will handle tasks such as:
+
+* Invoice PDF generation
+* Email sending
+* WhatsApp notifications
+* Excel processing
+* Large report generation
+* Scheduled payment reminders
+* Low-stock alerts
+* Overdue notifications
+* Daily summaries
+
+Architecture:
+
+```text
+FastAPI
+   │
+   ▼
+Redis Queue
+   │
+   ▼
+Background Worker
+   │
+   ├── Generate PDF
+   ├── Send Email
+   ├── Send WhatsApp
+   └── Process Excel
+```
+
+This keeps the main application responsive.
+
+---
+
+# 13. Inventory Engine
+
+Inventory will use a **transaction-based inventory ledger** instead of simply storing a manually editable stock number.
+
+Example:
+
+```text
+Purchase       +500 KG
+Sale           -100 KG
+Adjustment      -10 KG
+Transfer        -50 KG
+Transfer        +50 KG
+```
+
+The system can determine:
+
+```text
+Available Stock
+Reserved Stock
+Total Stock
+```
+
+at any point.
+
+### Batch Tracking
+
+Since Avighnya Foods deals with food ingredients, batches will be tracked.
+
+Each batch can contain:
+
+```text
+Batch Number
+Product
+Manufacturer
+Manufacturing Date
+Expiry Date
+Purchase Cost
+Warehouse
+Quantity
+```
+
+This enables traceability from purchase through sale and dispatch.
+
+---
+
+# 14. Sales Engine
+
+The sales engine will manage the complete sales lifecycle:
+
+```text
+Lead
+ ↓
+Qualification
+ ↓
+Opportunity
+ ↓
+Quotation
+ ↓
+Price Approval
+ ↓
+Sales Order
+ ↓
+Stock Allocation
+ ↓
+Dispatch
+ ↓
+Invoice
+ ↓
+Payment
+```
+
+Each stage will have its own status and permissions.
+
+---
+
+# 15. Pricing Engine
+
+Pricing should be implemented as a dedicated business component.
+
+It can consider:
+
+```text
+Product
+Customer
+Company
+Quantity
+Customer category
+Negotiated price
+Discount
+Minimum selling price
+Approval requirement
+GST
+```
+
+Example:
+
+```text
+Base Price
+   ↓
+Customer-specific Price
+   ↓
+Quantity Discount
+   ↓
+Negotiated Discount
+   ↓
+Approval Check
+   ↓
+Final Selling Price
+```
+
+This prevents pricing logic from being duplicated across different screens.
+
+---
+
+# 16. Billing Engine
+
+The billing module will calculate:
+
+```text
+Quantity × Unit Price
+        ↓
+Gross Amount
+        ↓
+Discount
+        ↓
+Taxable Amount
+        ↓
+GST
+        ↓
+Invoice Total
+```
+
+The invoice will store a **snapshot of the transaction**.
+
+This means if a product's price changes later, previously generated invoices will not change.
+
+---
+
+# 17. Credit & Receivables Engine
+
+The system will automatically calculate:
+
+```text
+Invoice Amount
+        -
+Payments Received
+        =
+Outstanding
+```
+
+It will then compare:
+
+```text
+Invoice Date
++
+Credit Days
+=
+Due Date
+```
+
+The system can categorize invoices as:
+
+```text
+Not Due
+Due Soon
+Due Today
+Overdue
+Partially Paid
+Fully Paid
+```
+
+The aging report can then provide:
+
+```text
+0–30 Days
+31–60 Days
+61–90 Days
+90+ Days
+```
+
+---
+
+# 18. Excel Processing
+
+Excel is currently an important part of Avighnya Foods' operations, so the system will support structured Excel imports and exports.
+
+Import workflow:
+
+```text
+Upload Excel
+      ↓
+File Validation
+      ↓
+Column Validation
+      ↓
+Data Validation
+      ↓
+Duplicate Detection
+      ↓
+Error Report
+      ↓
+User Confirmation
+      ↓
+Database Import
+```
+
+For example:
+
+```text
+1,000 rows uploaded
+
+Valid        960
+Duplicates    25
+Errors        15
+```
+
+The user should be able to review errors before final import.
+
+---
+
+# 19. Document & File Management
+
+The system will support files such as:
+
+* Customer documents
+* GST documents
+* Purchase documents
+* Product documents
+* Invoices
+* Credit notes
+* Debit notes
+* Delivery documents
+* Excel files
+* Field visit photos
+
+The database will store file metadata while actual files will be stored separately.
+
+---
+
+# 20. Authentication & Authorization
+
+The system will use secure authentication with:
+
+* Password hashing
+* Access tokens
+* Refresh tokens
+* Session management
+* Role-based permissions
+
+Roles include:
+
+```text
+Super Admin
+Supervisor
+Accountant
+Logistics
+Sales
+```
+
+But permissions should be more granular than roles.
+
+Example:
+
+```text
+Sales
+├── View Customers
+├── Create Lead
+├── Create Quotation
+├── View Inventory
+└── Cannot Modify Invoice
+
+Accountant
+├── View Invoice
+├── Create Invoice
+├── Record Payment
+├── View Receivables
+└── Cannot Modify Inventory
+```
+
+---
+
+# 21. Audit Logging
+
+Critical actions will be recorded.
+
+Example:
+
+```text
+User: Supervisor
+Action: Credit Limit Changed
+
+Customer:
+ABC Foods
+
+Old Limit:
+₹2,00,000
+
+New Limit:
+₹3,00,000
+
+Timestamp:
+11-Aug-2026 15:30
+
+IP:
+xxx.xxx.xxx.xxx
+```
+
+Audit logs should cover:
+
+* Price changes
+* Invoice changes
+* Payment changes
+* Credit limit changes
+* Stock adjustments
+* Approvals
+* User permissions
+* Customer modifications
+
+---
+
+# 22. Notification System
+
+The notification engine will support:
+
+### In-app
+
+```text
+🔔 Payment overdue
+🔔 Low stock
+🔔 Approval pending
+🔔 New lead
+```
+
+### Email
+
+```text
+Invoice
+Payment reminder
+Approval request
+Reports
+```
+
+### WhatsApp
+
+Potentially:
+
+```text
+Invoice
+Payment reminder
+Order confirmation
+Dispatch update
+```
+
+The notification system should use background workers rather than blocking the main API request.
+
+---
+
+# 23. VPS Infrastructure
+
+The complete application will initially run on a **Linux VPS**.
+
+Docker will isolate each application component.
+
+```text
+VPS
+│
+├── Nginx Container
+├── Next.js Container
+├── FastAPI Container
+├── PostgreSQL Container
+├── Redis Container
+└── Worker Container
+```
+
+Docker Compose will manage these services.
+
+This provides:
+
+* Consistent deployment
+* Easy service management
+* Easy rollback
+* Environment isolation
+* Easier backups
+* Easier development-to-production migration
+
+---
+
+# 24. Nginx
+
+Nginx will act as the reverse proxy.
+
+Example:
+
+```text
+https://avighnyafoods.com
+        ↓
+      Nginx
+        ↓
+     Next.js
+```
+
+And:
+
+```text
+https://api.avighnyafoods.com
+        ↓
+      Nginx
+        ↓
+     FastAPI
+```
+
+Nginx will also handle:
+
+* HTTPS
+* SSL termination
+* Request routing
+* Security headers
+* Request size limits
+* Static file handling
+* Reverse proxying
+
+---
+
+# 25. GitHub
+
+GitHub will be used as the central source-control platform.
+
+Repository structure can be:
+
+```text
+avighnya-foods/
+│
+├── frontend/
+├── backend/
+├── worker/
+├── infrastructure/
+├── docker-compose.yml
+├── README.md
+└── documentation/
+```
+
+Git branches:
+
+```text
+main
+ │
+ └── production
+
+develop
+ │
+ ├── feature/crm
+ ├── feature/inventory
+ ├── feature/billing
+ └── feature/reports
+```
+
+Feature development should happen through pull requests rather than directly modifying production.
+
+---
+
+# 26. CI/CD with GitHub Actions
+
+GitHub Actions will automate deployment.
+
+```text
+Developer
+    ↓
+git push
+    ↓
+GitHub
+    ↓
+GitHub Actions
+    ↓
+Run Tests
+    ↓
+Build Docker Images
+    ↓
+Deploy to VPS
+    ↓
+Run Database Migrations
+    ↓
+Restart Services
+    ↓
+Health Check
+```
+
+This reduces manual deployment errors.
+
+---
+
+# 27. Environment Management
+
+Separate environments will be maintained:
+
+```text
+Development
+Staging
+Production
+```
+
+Configuration will be provided through environment variables.
+
+Example:
+
+```text
+DATABASE_URL
+REDIS_URL
+JWT_SECRET
+SMTP_HOST
+WHATSAPP_API_KEY
+STORAGE_PATH
+```
+
+Sensitive credentials will **not** be stored in GitHub source code.
+
+---
+
+# 28. Security
+
+The production VPS will implement:
+
+* SSH key authentication
+* Firewall
+* HTTPS
+* Secure environment variables
+* Database access restrictions
+* Password hashing
+* API authentication
+* Role-based authorization
+* Input validation
+* File upload validation
+* Rate limiting
+* Audit logging
+* Regular security updates
+* Automated backups
+
+PostgreSQL and Redis should **not be publicly exposed to the internet**.
+
+Only the required HTTP/HTTPS services should be publicly accessible.
+
+---
+
+# 29. Backup Architecture
+
+Because the VPS contains business-critical information, automated backups will be implemented.
+
+```text
+PostgreSQL
+     │
+     ▼
+Automated Backup
+     │
+     ▼
+Compressed Backup
+     │
+     ▼
+Remote Backup Storage
+```
+
+Backups should cover:
+
+* Database
+* Uploaded documents
+* Invoice files
+* Configuration required for recovery
+
+A restore procedure should also be tested periodically.
+
+**A backup that has never been restored is not a fully trusted backup.**
+
+---
+
+# 30. Monitoring
+
+Initially, monitoring can remain lightweight.
+
+Monitor:
+
+```text
+CPU
+RAM
+Disk
+Database
+API
+Frontend
+Docker containers
+SSL certificate
+```
+
+We can use tools such as:
+
+* Uptime Kuma
+* Docker logs
+* System monitoring
+* Application error tracking
+
+As the system grows, Prometheus + Grafana can be introduced.
+
+---
+
+# 31. Scalability
+
+The architecture is designed to scale gradually.
+
+### Stage 1
+
+```text
+One VPS
+│
+├── Frontend
+├── Backend
+├── PostgreSQL
+├── Redis
+└── Worker
+```
+
+### Stage 2
+
+```text
+VPS 1
+├── Frontend
+├── Backend
+└── Worker
+
+VPS 2
+└── PostgreSQL
+```
+
+### Stage 3
+
+```text
+Load Balancer
+      │
+ ┌────┴────┐
+ ▼         ▼
+API 1     API 2
+ │         │
+ └────┬────┘
+      ▼
+ PostgreSQL
+      │
+    Redis
+```
+
+So the initial VPS architecture doesn't prevent future growth.
+
+---
+
+# 32. Overall Technology Stack
+
+### Frontend
+
+**Next.js + TypeScript + Tailwind CSS**
+
+### Backend
+
+**FastAPI + Python**
+
+### Database
+
+**PostgreSQL**
+
+### ORM
+
+**SQLAlchemy**
+
+### Database Migration
+
+**Alembic**
+
+### Cache / Queue
+
+**Redis**
+
+### Background Processing
+
+**Celery / ARQ**
+
+### Reverse Proxy
+
+**Nginx**
+
+### Containerization
+
+**Docker + Docker Compose**
+
+### Source Control
+
+**GitHub**
+
+### CI/CD
+
+**GitHub Actions**
+
+### Server
+
+**Linux VPS**
+
+### File Storage
+
+**VPS storage initially, object storage as the system scales**
+
+### Security
+
+**HTTPS + JWT + RBAC + firewall + audit logs**
+
+### Monitoring
+
+**Uptime monitoring + server/application logs, with Prometheus/Grafana as a future enhancement**
+
+---
+
+## 33. Final Technical Architecture
+
+```text
+                         AVIGHNYA FOODS
+                       BUSINESS PLATFORM
+                              │
+                              ▼
+                         ┌─────────┐
+                         │  USERS  │
+                         └────┬────┘
+                              │
+                            HTTPS
+                              │
+                              ▼
+                         ┌─────────┐
+                         │  NGINX  │
+                         └────┬────┘
+                              │
+                    ┌─────────┴─────────┐
+                    ▼                   ▼
+              ┌──────────┐        ┌──────────┐
+              │ Next.js  │        │ FastAPI  │
+              │ Frontend │◄──────►│ Backend  │
+              └──────────┘        └────┬─────┘
+                                       │
+             ┌──────────────┬──────────┼──────────┐
+             ▼              ▼          ▼          ▼
+        PostgreSQL        Redis     Worker     File Storage
+             │              │          │
+             │              │          ├── PDF
+             │              │          ├── Email
+             │              │          ├── WhatsApp
+             │              │          ├── Excel
+             │              │          └── Alerts
+             │
+             ▼
+      ┌──────────────────────┐
+      │ Business Data        │
+      │                      │
+      │ CRM                  │
+      │ Customers            │
+      │ Sales                │
+      │ Purchases            │
+      │ Inventory            │
+      │ Dispatch             │
+      │ Billing              │
+      │ Receivables          │
+      │ Reports              │
+      │ Multi-Company        │
+      └──────────────────────┘
+
+
+                    DEVELOPMENT & DEPLOYMENT
+
+Developer
+    │
+    ▼
+  GitHub
+    │
+    ▼
+GitHub Actions
+    │
+    ├── Test
+    ├── Build
+    ├── Validate
+    └── Deploy
+          │
+          ▼
+        VPS
+          │
+          ▼
+    Docker Compose
+```
+
+### In simple terms
+
+**Next.js** = what the users see.
+
+**FastAPI** = the brain/business logic.
+
+**PostgreSQL** = stores the business data.
+
+**Redis** = fast temporary data + job queue.
+
+**Worker** = handles heavy/automatic tasks.
+
+**Nginx** = receives internet traffic and routes it safely.
+
+**Docker** = packages and runs all components consistently.
+
+**GitHub** = stores and manages the source code.
+
+**GitHub Actions** = automatically tests and deploys the application.
+
+**VPS** = where the production system runs.
+
+This is a **solid, practical architecture for Avighnya Foods v1** without over-engineering it with Kubernetes, microservices, or expensive cloud infrastructure from day one.

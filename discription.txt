@@ -1,0 +1,1679 @@
+Absolutely. For Avighnya Foods, I would turn the current proposal into a **complete functional feature list** before development starts. This will also help you define the scope, database, APIs, UI screens, development effort, and quotation.
+
+# Avighnya Foods — Detailed Feature List
+
+## 1. Authentication & Access Control
+
+### 1.1 Login
+
+* Username/email + password login
+* Remember session
+* Logout
+* Session timeout
+* Login history
+* Failed login tracking
+
+### 1.2 Password Management
+
+* Forgot password
+* Password reset
+* Change password
+* Password strength validation
+* Forced password change by administrator
+
+### 1.3 Role-Based Access Control
+
+Roles:
+
+* Super Admin
+* Owner
+* Supervisor
+* Sales
+* Accountant
+* Logistics
+* Warehouse
+
+Permissions can be controlled individually:
+
+* View
+* Create
+* Edit
+* Delete
+* Approve
+* Export
+* Print
+* Download
+* Share
+
+Example:
+
+```text
+Salesperson
+✓ View Customers
+✓ Create Leads
+✓ Create Quotations
+✓ View Own Sales
+✗ Modify Invoices
+✗ Modify Stock
+✗ View Financial Reports
+```
+
+### 1.4 User Management
+
+* Create user
+* Edit user
+* Deactivate user
+* Assign role
+* Assign company
+* Assign warehouse
+* Assign salesperson
+* Permission override
+* Login activity
+* Last active time
+
+---
+
+# 2. Organization & Multi-Company Management
+
+The system will support **four business firms under one organization**.
+
+### 2.1 Company Master
+
+* Add company
+* Edit company
+* Activate/deactivate company
+* Company logo
+* Legal name
+* Trade name
+* GSTIN
+* PAN
+* Address
+* Phone
+* Email
+* Bank details
+* Invoice prefix
+* Financial year
+
+### 2.2 Company Switching
+
+Owner can switch:
+
+```text
+Company A
+Company B
+Company C
+Company D
+All Companies
+```
+
+### 2.3 Company-Level Data Isolation
+
+Each company maintains its own:
+
+* Customers
+* Suppliers
+* Products
+* Warehouses
+* Inventory
+* Purchases
+* Sales
+* Invoices
+* Payments
+* Reports
+
+### 2.4 Consolidated View
+
+Owner can see:
+
+* Total sales
+* Total purchases
+* Total outstanding
+* Total inventory value
+* Company comparison
+* Sales comparison
+* Customer comparison
+* Profitability indicators
+
+---
+
+# 3. Dashboard
+
+## 3.1 Owner Dashboard
+
+KPIs:
+
+* Today's sales
+* Monthly sales
+* Yearly sales
+* Purchases
+* Outstanding
+* Collections
+* Overdue amount
+* Inventory value
+* Active customers
+* New leads
+* Conversion rate
+
+### Charts
+
+* Sales trend
+* Purchase trend
+* Collection trend
+* Outstanding trend
+* Sales by company
+* Sales by salesperson
+* Top customers
+* Top products
+
+### Alerts
+
+* Overdue payments
+* Low stock
+* Pending approvals
+* Pending dispatches
+* Expiring batches
+* Credit limit exceeded
+
+---
+
+# 4. CRM & Lead Management
+
+## 4.1 Lead Creation
+
+Lead information:
+
+* Lead ID
+* Business name
+* Contact person
+* Phone
+* WhatsApp
+* Email
+* Location
+* Lead source
+* Product requirement
+* Quantity
+* Expected purchase frequency
+* Estimated value
+* Lead type
+* Assigned salesperson
+* Notes
+
+### Lead Sources
+
+Examples:
+
+* WhatsApp
+* Phone
+* Website
+* Referral
+* Existing customer
+* Advertisement
+* Walk-in
+* Salesperson
+* Other
+
+---
+
+## 4.2 Lead Classification
+
+Automatically or manually classify:
+
+```text
+Wholesale
+Retail
+Distributor
+Manufacturer
+Other
+```
+
+Retail leads can be filtered out or routed separately if the business does not want salespeople spending time on them.
+
+---
+
+## 4.3 Lead Pipeline
+
+```text
+New
+ ↓
+Contacted
+ ↓
+Qualified
+ ↓
+Visit Required
+ ↓
+Quotation
+ ↓
+Negotiation
+ ↓
+Won
+ ↓
+Customer
+```
+
+Lost reasons:
+
+* Price too high
+* Product unavailable
+* Competitor
+* No requirement
+* Retail customer
+* Location
+* Payment terms
+* Other
+
+---
+
+# 5. WhatsApp Lead Capture
+
+Potential integration with WhatsApp API.
+
+Features:
+
+* Capture incoming enquiries
+* Identify customer/lead
+* Create lead
+* Assign salesperson
+* Store conversation reference
+* Capture product requirement
+* Trigger follow-up
+* Send quotation
+* Send invoice
+* Send payment reminder
+
+---
+
+# 6. AI Lead Qualification
+
+Phase 2/optional feature.
+
+AI can analyze:
+
+* Lead type
+* Product requirement
+* Estimated order value
+* Frequency
+* Customer type
+* Location
+* Potential value
+
+Then assign:
+
+```text
+Hot
+Warm
+Cold
+```
+
+Example:
+
+```text
+"Need 500 KG every month"
+
+→ Wholesale
+→ Recurring requirement
+→ High potential
+→ HOT
+```
+
+---
+
+# 7. Customer Management
+
+## 7.1 Customer Master
+
+Fields:
+
+* Customer ID
+* Company/business name
+* Customer type
+* Contact person
+* Phone
+* WhatsApp
+* Email
+* Address
+* GSTIN
+* PAN
+* Billing address
+* Shipping address
+* Assigned salesperson
+* Credit limit
+* Credit days
+* Payment terms
+* Status
+
+---
+
+## 7.2 Customer Contacts
+
+Multiple contacts:
+
+```text
+Owner
+Purchase Manager
+Accounts Manager
+Store Manager
+Other
+```
+
+Each can have:
+
+* Name
+* Designation
+* Phone
+* WhatsApp
+* Email
+
+---
+
+## 7.3 Customer History
+
+Show:
+
+* Leads
+* Visits
+* Quotations
+* Orders
+* Invoices
+* Payments
+* Outstanding
+* Credit history
+* Products purchased
+* Purchase frequency
+* Last purchase
+* Total revenue
+
+---
+
+# 8. Customer Analytics
+
+For every customer:
+
+### Revenue
+
+* Total sales
+* Monthly sales
+* Yearly sales
+* Average order value
+
+### Payment
+
+* Total paid
+* Outstanding
+* Overdue
+* Average payment delay
+
+### Product
+
+* Most purchased products
+* Purchase frequency
+* Quantity purchased
+
+### Ranking
+
+```text
+A Customer
+B Customer
+C Customer
+```
+
+based on revenue/value.
+
+---
+
+# 9. Customer Documents
+
+Upload:
+
+* GST certificate
+* PAN
+* Company documents
+* Agreements
+* Purchase documents
+* Other files
+
+Document:
+
+* Upload
+* Download
+* Replace
+* Delete
+* View
+* Access control
+
+---
+
+# 10. Sales Management
+
+## 10.1 Opportunity Management
+
+Each opportunity tracks:
+
+* Customer
+* Product
+* Quantity
+* Expected price
+* Expected value
+* Probability
+* Expected closing date
+* Salesperson
+* Stage
+
+---
+
+# 11. Quotation Management
+
+### Create quotation
+
+* Customer
+* Products
+* Quantity
+* Unit price
+* Discount
+* GST
+* Validity
+* Payment terms
+* Delivery terms
+* Notes
+
+### Quotation actions
+
+* Save draft
+* Submit
+* Send
+* Approve
+* Reject
+* Revise
+* Duplicate
+* Convert to order
+* PDF
+* Email
+* WhatsApp
+
+---
+
+# 12. Price Approval
+
+When salesperson enters a price below the permitted level:
+
+```text
+Quotation
+     ↓
+Price Validation
+     ↓
+Below minimum?
+     ↓
+Approval Required
+     ↓
+Owner/Supervisor
+     ↓
+Approve / Reject
+```
+
+Maintain approval history:
+
+* Requested by
+* Requested date
+* Approved by
+* Approved date
+* Old price
+* Proposed price
+* Reason
+* Comments
+
+---
+
+# 13. Sales Order
+
+Quotation can be converted into a Sales Order.
+
+Sales order includes:
+
+* Customer
+* Products
+* Quantity
+* Price
+* Discount
+* Tax
+* Delivery address
+* Delivery date
+* Payment terms
+* Credit terms
+* Assigned salesperson
+
+Status:
+
+```text
+Draft
+Confirmed
+Partially Allocated
+Allocated
+Dispatched
+Completed
+Cancelled
+```
+
+---
+
+# 14. Field Sales Application
+
+Mobile-responsive sales interface.
+
+## 14.1 Customer Visit
+
+* Check-in
+* GPS location
+* Check-out
+* Visit duration
+* Customer
+* Purpose
+* Notes
+* Requirements
+* Next follow-up
+
+---
+
+## 14.2 Geotagged Photos
+
+Salesperson can capture:
+
+* Store photo
+* Product photo
+* Display photo
+* Requirement photo
+
+Store:
+
+* Photo
+* GPS
+* Timestamp
+* User
+
+---
+
+## 14.3 Voice Notes
+
+Salesperson can record:
+
+> "Customer requires 200 KG next month."
+
+System stores the voice note.
+
+Future AI capability:
+
+```text
+Voice
+ ↓
+Speech-to-text
+ ↓
+Customer activity
+```
+
+---
+
+# 15. Follow-Up Management
+
+Follow-up:
+
+* Date
+* Time
+* Customer
+* Lead
+* Purpose
+* Notes
+* Assigned salesperson
+
+Statuses:
+
+```text
+Pending
+Completed
+Missed
+Rescheduled
+Cancelled
+```
+
+Notifications:
+
+* Follow-up due
+* Follow-up overdue
+* Today's follow-ups
+
+---
+
+# 16. Salesperson Performance
+
+Track:
+
+* Leads assigned
+* Leads contacted
+* Visits
+* Quotations
+* Orders
+* Revenue
+* Conversion rate
+* Follow-ups
+* Lost leads
+* Collections
+* Customer acquisition
+
+---
+
+# 17. Product Management
+
+## Product Master
+
+Fields:
+
+* Product code
+* Product name
+* Category
+* Subcategory
+* Manufacturer
+* Brand
+* Unit
+* Pack size
+* GST rate
+* HSN code
+* Minimum stock
+* Maximum stock
+* Reorder level
+* Status
+
+---
+
+# 18. Product Pricing
+
+Support:
+
+* Standard price
+* Customer-specific price
+* Company-specific price
+* Quantity-based price
+* Negotiated price
+* Minimum selling price
+* Purchase cost
+* Margin
+
+Price history:
+
+```text
+Old Price
+New Price
+Changed By
+Changed Date
+Reason
+```
+
+---
+
+# 19. Manufacturer / Supplier Management
+
+Supplier master:
+
+* Supplier name
+* Contact person
+* Phone
+* Email
+* Address
+* GSTIN
+* PAN
+* Payment terms
+* Credit period
+* Products supplied
+* Status
+
+Supplier analytics:
+
+* Purchase value
+* Purchase frequency
+* Average price
+* Pending orders
+* Delivery performance
+
+---
+
+# 20. Purchase Management
+
+## Purchase Order
+
+* Supplier
+* Products
+* Quantity
+* Purchase price
+* Expected delivery
+* Payment terms
+* Warehouse
+* Notes
+
+Status:
+
+```text
+Draft
+Sent
+Confirmed
+Partially Received
+Received
+Cancelled
+```
+
+---
+
+# 21. Goods Receipt
+
+When goods arrive:
+
+* Purchase order
+* Product
+* Quantity
+* Batch
+* Manufacturing date
+* Expiry date
+* Warehouse
+* Purchase cost
+* Received quantity
+* Shortage/damage
+
+Stock gets updated only after confirmation.
+
+---
+
+# 22. Inventory Management
+
+## Warehouse Master
+
+* Warehouse
+* Location
+* Manager
+* Contact
+* Capacity
+* Status
+
+---
+
+# 23. Stock Management
+
+Track:
+
+* Total stock
+* Available stock
+* Reserved stock
+* Damaged stock
+* In-transit stock
+
+Example:
+
+```text
+Total Stock       1,000 KG
+Reserved            200 KG
+Available           800 KG
+```
+
+---
+
+# 24. Batch Management
+
+Track:
+
+* Batch number
+* Product
+* Supplier
+* Manufacturing date
+* Expiry date
+* Quantity
+* Warehouse
+* Purchase cost
+
+Features:
+
+* Batch search
+* Batch movement
+* Batch history
+* Expiry alerts
+* Batch traceability
+
+---
+
+# 25. Stock Inward
+
+Sources:
+
+* Purchase
+* Customer return
+* Stock transfer
+* Adjustment
+
+---
+
+# 26. Stock Outward
+
+Sources:
+
+* Sales order
+* Dispatch
+* Damage
+* Internal consumption
+* Stock transfer
+* Adjustment
+
+---
+
+# 27. Stock Transfer
+
+Transfer between warehouses:
+
+```text
+Warehouse A
+     ↓
+Transfer Request
+     ↓
+Approval
+     ↓
+Dispatch
+     ↓
+Warehouse B
+```
+
+Track:
+
+* Quantity
+* Batch
+* Sender
+* Receiver
+* Date
+* Status
+
+---
+
+# 28. Stock Reservation
+
+When a sales order is confirmed:
+
+```text
+Available Stock
+       ↓
+Reserve Stock
+```
+
+This prevents another order from consuming the same stock.
+
+---
+
+# 29. Low Stock Management
+
+Define:
+
+```text
+Minimum Stock
+Reorder Level
+Maximum Stock
+```
+
+Alert:
+
+```text
+Current Stock < Reorder Level
+```
+
+→ Low stock notification.
+
+---
+
+# 30. Inventory Analytics
+
+Reports:
+
+* Current stock
+* Stock valuation
+* Fast-moving products
+* Slow-moving products
+* Dead stock
+* Low stock
+* Expiring stock
+* Batch status
+* Warehouse-wise stock
+* Product-wise stock
+
+---
+
+# 31. Dispatch Management
+
+## Dispatch Planning
+
+* Sales order
+* Customer
+* Products
+* Quantity
+* Warehouse
+* Vehicle
+* Driver
+* Transport agency
+* Dispatch date
+
+---
+
+# 32. Vehicle Management
+
+Track:
+
+* Vehicle number
+* Vehicle type
+* Driver
+* Driver phone
+* Transport company
+* Capacity
+
+---
+
+# 33. Dispatch Status
+
+```text
+Pending
+Picking
+Packed
+Ready
+Dispatched
+In Transit
+Delivered
+Cancelled
+```
+
+---
+
+# 34. Delivery Confirmation
+
+Capture:
+
+* Delivery date
+* Receiver name
+* Signature
+* Photo
+* Delivery remarks
+* Proof of delivery
+
+---
+
+# 35. Billing & Invoicing
+
+## Invoice Creation
+
+Generate invoice from:
+
+```text
+Sales Order
+      ↓
+Invoice
+```
+
+Features:
+
+* Invoice number
+* Invoice date
+* Customer
+* Products
+* Quantity
+* Price
+* Discount
+* GST
+* Total
+* Payment terms
+* Due date
+
+---
+
+# 36. GST Billing
+
+Support:
+
+* CGST
+* SGST
+* IGST
+* GST rate
+* HSN
+* Taxable amount
+* GST amount
+
+Company GST details will be maintained separately for each firm.
+
+---
+
+# 37. Invoice PDF
+
+Generate professional invoice PDFs with:
+
+* Company logo
+* Company details
+* Customer details
+* GST details
+* Invoice number
+* Product table
+* Tax calculation
+* Total
+* Payment details
+* Terms & conditions
+
+---
+
+# 38. Invoice Communication
+
+Invoice can be:
+
+* Downloaded
+* Printed
+* Emailed
+* Shared through WhatsApp
+
+---
+
+# 39. Credit Note
+
+Features:
+
+* Create credit note
+* Link original invoice
+* Select products
+* Quantity
+* Reason
+* Tax adjustment
+* Approval
+* PDF
+
+---
+
+# 40. Debit Note
+
+Features:
+
+* Create debit note
+* Link invoice
+* Reason
+* Amount
+* Tax
+* Approval
+* PDF
+
+---
+
+# 41. Payment Management
+
+Record:
+
+* Customer
+* Invoice
+* Payment amount
+* Payment date
+* Payment method
+* Bank
+* Reference number
+* Notes
+
+Payment methods:
+
+* Bank transfer
+* UPI
+* Cheque
+* Cash
+* Other
+
+---
+
+# 42. Receivables
+
+Show:
+
+```text
+Total Receivable
+Current Due
+Overdue
+Due Soon
+Partially Paid
+```
+
+Invoice-level details:
+
+* Invoice amount
+* Paid amount
+* Outstanding
+* Due date
+* Days overdue
+
+---
+
+# 43. Aging Report
+
+```text
+0–30 Days
+31–60 Days
+61–90 Days
+90+ Days
+```
+
+Filter by:
+
+* Company
+* Customer
+* Salesperson
+* Date
+* Amount
+
+---
+
+# 44. Credit Management
+
+Customer-level:
+
+* Credit limit
+* Credit days
+* Current exposure
+* Available credit
+* Outstanding
+* Overdue
+
+Example:
+
+```text
+Credit Limit       ₹5,00,000
+Current Exposure   ₹4,20,000
+Available Credit   ₹80,000
+```
+
+If the customer exceeds the limit:
+
+```text
+⚠ Credit Limit Exceeded
+```
+
+New orders may require approval.
+
+---
+
+# 45. Automated Payment Reminders
+
+System can generate:
+
+### Before due date
+
+> Payment due in 3 days.
+
+### Due date
+
+> Payment is due today.
+
+### After due date
+
+> Payment is overdue by 7 days.
+
+Channels:
+
+* In-app
+* Email
+* WhatsApp
+
+---
+
+# 46. Notification Center
+
+Central notification screen:
+
+```text
+🔴 Payment overdue
+🟡 Approval pending
+🟡 Low stock
+🔵 New lead
+🔵 New order
+🟢 Payment received
+```
+
+Features:
+
+* Read/unread
+* Mark all read
+* Filter
+* Notification history
+
+---
+
+# 47. Reports
+
+## Sales Reports
+
+* Daily sales
+* Monthly sales
+* Annual sales
+* Product-wise sales
+* Customer-wise sales
+* Salesperson-wise sales
+* Company-wise sales
+* Sales trend
+* Quotation conversion
+
+## Purchase Reports
+
+* Supplier-wise purchase
+* Product-wise purchase
+* Purchase cost
+* Purchase history
+* Pending purchase orders
+
+## Inventory Reports
+
+* Current stock
+* Stock movement
+* Stock valuation
+* Batch report
+* Expiry report
+* Low stock
+* Dead stock
+* Warehouse report
+
+## Financial Reports
+
+* Receivables
+* Payments
+* Outstanding
+* Aging
+* Credit performance
+* Collection report
+
+## Customer Reports
+
+* Top customers
+* Customer revenue
+* Purchase frequency
+* Customer growth
+* Outstanding customers
+* Payment behavior
+
+## Salesperson Reports
+
+* Leads
+* Visits
+* Follow-ups
+* Quotations
+* Orders
+* Revenue
+* Conversion
+* Collection
+
+---
+
+# 48. Export System
+
+Reports can be exported to:
+
+* Excel
+* CSV
+* PDF
+
+Filters applied on screen should also apply to exports.
+
+---
+
+# 49. Search & Filtering
+
+Global search can search:
+
+* Customer
+* Lead
+* Product
+* Invoice
+* Sales order
+* Purchase order
+* Batch
+* Payment
+
+Filters:
+
+* Company
+* Date
+* Status
+* Salesperson
+* Warehouse
+* Customer
+* Product
+
+---
+
+# 50. Activity Timeline
+
+Each important entity can have a timeline.
+
+Example:
+
+```text
+Customer ABC Foods
+
+10:30 AM
+Quotation created
+
+11:15 AM
+Price approved
+
+2:30 PM
+Sales order created
+
+Next day
+Dispatch completed
+
+5:00 PM
+Invoice generated
+
+10 Aug
+Payment received
+```
+
+This provides a complete business history.
+
+---
+
+# 51. Audit Trail
+
+Track sensitive actions:
+
+* Login
+* Logout
+* Price changes
+* Credit changes
+* Invoice changes
+* Payment changes
+* Stock adjustments
+* Approvals
+* User permission changes
+* Customer modifications
+* Product modifications
+
+---
+
+# 52. Dashboard Customization
+
+Depending on role:
+
+### Owner
+
+Business overview.
+
+### Sales
+
+Sales pipeline and targets.
+
+### Accounts
+
+Invoices, payments and receivables.
+
+### Warehouse
+
+Stock and dispatch.
+
+### Supervisor
+
+Team performance and approvals.
+
+Users should only see information permitted for their role.
+
+---
+
+# 53. Settings
+
+System settings:
+
+* Company settings
+* GST settings
+* Invoice settings
+* Numbering
+* Payment terms
+* Credit rules
+* Notification settings
+* User roles
+* Permissions
+* Product categories
+* Units
+* Warehouses
+* Tax rates
+* Approval rules
+
+---
+
+# 54. Data Import & Export
+
+Import:
+
+* Customers
+* Products
+* Suppliers
+* Opening stock
+* Opening receivables
+* Historical sales
+* Historical purchases
+
+Export:
+
+* Customers
+* Products
+* Inventory
+* Sales
+* Purchases
+* Payments
+* Reports
+
+---
+
+# 55. Opening Balance Management
+
+During migration from Excel/Tally:
+
+### Customer opening balance
+
+```text
+Customer
+Invoice
+Outstanding
+Due Date
+```
+
+### Inventory opening balance
+
+```text
+Product
+Batch
+Warehouse
+Quantity
+Cost
+```
+
+This is important for moving the existing business data into the new platform.
+
+---
+
+# 56. Data Migration
+
+Initial migration can follow:
+
+```text
+Existing Excel/Tally
+        ↓
+Data Cleaning
+        ↓
+Data Mapping
+        ↓
+Duplicate Detection
+        ↓
+Validation
+        ↓
+Import
+        ↓
+Verification
+```
+
+---
+
+# 57. Business Automation
+
+Automations can include:
+
+```text
+New Lead
+ → Assign Salesperson
+
+Quotation Below Minimum Price
+ → Approval Request
+
+Sales Order Confirmed
+ → Reserve Stock
+
+Order Ready
+ → Dispatch Notification
+
+Invoice Generated
+ → Send Invoice
+
+Payment Due
+ → Reminder
+
+Payment Overdue
+ → Escalation
+
+Stock Below Reorder Level
+ → Low Stock Alert
+
+Batch Near Expiry
+ → Expiry Alert
+```
+
+---
+
+# 58. Phase 2 Features
+
+These should **not be part of the core MVP unless specifically agreed and priced**.
+
+### AI Demand Forecasting
+
+Predict:
+
+* Product demand
+* Monthly requirements
+* Seasonal demand
+
+### AI Purchase Recommendation
+
+Example:
+
+```text
+Current stock: 100 KG
+Average monthly sales: 500 KG
+Expected demand: 600 KG
+
+Recommended purchase: 500 KG
+```
+
+### AI Sales Insights
+
+Identify:
+
+* Customers likely to reorder
+* Customers whose purchases are declining
+* High-value leads
+* Lost customer patterns
+* Salesperson performance patterns
+
+### AI Voice Assistant
+
+User could ask:
+
+> "How much is outstanding from ABC Foods?"
+
+System returns:
+
+> "ABC Foods has ₹3.4 lakh outstanding, of which ₹1.2 lakh is overdue."
+
+---
+
+# 59. Future Mobile Features
+
+Potential Phase 2:
+
+* Dedicated Android app
+* Barcode scanning
+* QR scanning
+* Warehouse scanning
+* Offline field sales
+* GPS tracking
+* Push notifications
+* Digital signature
+
+---
+
+# 60. Customer Portal
+
+Future customer login:
+
+```text
+Customer
+   ↓
+Portal
+   ├── Orders
+   ├── Quotations
+   ├── Invoices
+   ├── Payments
+   ├── Outstanding
+   └── Reorder
+```
+
+---
+
+# 61. Complete Functional Scope
+
+The final system can therefore be structured into:
+
+```text
+01. Authentication
+02. User Management
+03. Roles & Permissions
+04. Organization Management
+05. Multi-Company Management
+06. CRM
+07. Lead Management
+08. Customer Management
+09. Customer Analytics
+10. Sales Management
+11. Field Sales
+12. Quotation Management
+13. Price Approval
+14. Sales Orders
+15. Product Management
+16. Pricing Management
+17. Supplier Management
+18. Purchase Management
+19. Goods Receipt
+20. Warehouse Management
+21. Inventory Management
+22. Batch Management
+23. Stock Reservation
+24. Stock Transfer
+25. Dispatch Management
+26. Vehicle & Transport
+27. Delivery Confirmation
+28. Billing
+29. GST Invoicing
+30. Credit Notes
+31. Debit Notes
+32. Payment Management
+33. Receivables
+34. Credit Management
+35. Aging
+36. Notifications
+37. Dashboards
+38. Reports
+39. Search & Filters
+40. Activity Timeline
+41. Audit Logs
+42. Excel Import/Export
+43. Data Migration
+44. Document Management
+45. Business Automation
+46. System Settings
+47. Backup & Recovery
+48. AI Features — Phase 2
+49. Customer Portal — Phase 2
+50. Dedicated Mobile App — Phase 2
+```
+
+**For the actual development, I would split this into MVP → Phase 1 → Phase 2 rather than trying to build all 50 areas at once.** The next useful technical document would be a **module-by-module database schema/ERD**, mapping these features to the exact PostgreSQL tables and relationships.
