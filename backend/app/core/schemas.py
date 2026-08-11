@@ -248,11 +248,106 @@ class StockSetIn(BaseModel):
     quantity: Decimal
 
 
+class StockInwardIn(BaseModel):
+    product_id: int
+    warehouse_id: int | None = None
+    quantity: Decimal  # amount to add
+    batch: str | None = None
+    manufacturer: str | None = None
+    notes: str | None = None
+
+
 class StockOut(ORMModel):
     id: int
     product_id: int
     warehouse_id: int
     quantity: Decimal
+
+
+class StockMovementOut(ORMModel):
+    id: int
+    stock_balance_id: int
+    product_id: int
+    warehouse_id: int
+    kind: str
+    quantity: Decimal
+    balance_after: Decimal
+    batch: str | None
+    manufacturer: str | None
+    notes: str | None
+    created_at: datetime
+
+
+# ---- Purchases ----
+class PurchaseCreate(BaseModel):
+    customer_id: int
+    source: str = "direct"
+    manufacturer: str | None = None
+    product: str
+    quantity: Decimal
+    received: Decimal = Decimal("0")
+    value: Decimal = Decimal("0")
+    eta: str | None = None
+    status: str = "Confirmed"
+    notes: str | None = None
+
+
+class PurchaseOut(ORMModel):
+    id: int
+    company_id: int
+    customer_id: int
+    source: str
+    manufacturer: str | None
+    product: str
+    quantity: Decimal
+    received: Decimal
+    value: Decimal
+    eta: str | None
+    status: str
+    notes: str | None
+    created_at: datetime
+    dispatch_id: int | None = None  # set when a load is auto-created
+
+
+# ---- Dispatch ----
+class DispatchCreate(BaseModel):
+    customer_id: int
+    product: str
+    quantity: Decimal
+    vehicle_id: int | None = None
+    vehicle: str | None = None
+    transporter: str | None = None
+    lr: str | None = None
+    eta: str | None = None
+    status: str = "Pending"
+    notes: str | None = None
+
+
+class DispatchUpdate(BaseModel):
+    product: str | None = None
+    quantity: Decimal | None = None
+    vehicle_id: int | None = None
+    vehicle: str | None = None
+    transporter: str | None = None
+    lr: str | None = None
+    eta: str | None = None
+    status: str | None = None
+    notes: str | None = None
+
+
+class DispatchOut(ORMModel):
+    id: int
+    company_id: int
+    customer_id: int
+    product: str
+    quantity: Decimal
+    vehicle: str | None
+    transporter: str | None
+    lr: str | None
+    eta: str | None
+    status: str
+    notes: str | None
+    created_at: datetime
 
 
 # ---- Quotations / Sales ----

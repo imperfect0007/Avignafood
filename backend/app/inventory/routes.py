@@ -1,4 +1,5 @@
 from decimal import Decimal
+import re
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import func
@@ -7,8 +8,23 @@ from sqlalchemy.orm import Session
 from app.audit.service import write_audit
 from app.core.database import get_db
 from app.core.deps import AuthContext, require_perms
-from app.core.models import SalesOrder, SalesOrderLine, SalesOrderStatus, StockBalance, Warehouse
-from app.core.schemas import StockGlimpseOut, StockOut, StockSetIn, WarehouseOut
+from app.core.models import (
+    AuditLog,
+    SalesOrder,
+    SalesOrderLine,
+    SalesOrderStatus,
+    StockBalance,
+    StockMovement,
+    Warehouse,
+)
+from app.core.schemas import (
+    StockGlimpseOut,
+    StockInwardIn,
+    StockMovementOut,
+    StockOut,
+    StockSetIn,
+    WarehouseOut,
+)
 
 router = APIRouter(prefix="/inventory", tags=["inventory"])
 
@@ -30,6 +46,36 @@ def _default_warehouse(db: Session, company_id: int, org_id: int) -> Warehouse:
     db.add(wh)
     db.flush()
     return wh
+
+
+def _record_movement(
+    db: Session,
+    *,
+    auth: AuthContext,
+    company_id: int,
+    row: StockBalance,
+    kind: str,
+    quantity: Decimal,
+    batch: str | None = None,
+    manufacturer: str | None = None,
+    notes: str | None = None,
+) -> None:
+    db.add(
+        StockMovement(
+            organization_id=auth.organization_id,
+            company_id=company_id,
+            stock_balance_id=row.id,
+            product_id=row.product_id,
+            warehouse_id=row.warehouse_id,
+            kind=kind,
+            quantity=quantity,
+            balance_after=row.quantity or Decimal("0"),
+            batch=batch,
+            manufacturer=manufacturer,
+            notes=notes,
+            created_by_id=auth.user.id,
+        )
+    )
 
 
 @router.get("/warehouses", response_model=list[WarehouseOut])
@@ -89,6 +135,80 @@ def list_stock(
     )
 
 
+@router.get("/stock/{stock_id}/history", response_model=list[StockMovementOut])
+def stock_history(
+    stock_id: int,
+    auth: AuthContext = Depends(require_perms("inventory.view")),
+    db: Session = Depends(get_db),
+):
+    company_id = auth.require_company()
+    row = (
+        db.query(StockBalance)
+        .filter(
+            StockBalance.id == stock_id,
+            StockBalance.company_id == company_id,
+            StockBalance.organization_id == auth.organization_id,
+        )
+        .first()
+    )
+    if not row:
+        raise HTTPException(status_code=404, detail="Stock line not found")
+
+    moves = (
+        db.query(StockMovement)
+        .filter(
+            StockMovement.stock_balance_id == stock_id,
+            StockMovement.company_id == company_id,
+        )
+        .order_by(StockMovement.id.desc())
+        .limit(100)
+        .all()
+    )
+    if moves:
+        return moves
+
+    # ponytail: older inbounds only hit audit_logs — surface those until movements exist
+    logs = (
+        db.query(AuditLog)
+        .filter(
+            AuditLog.entity_type == "stock_balance",
+            AuditLog.entity_id == stock_id,
+            AuditLog.organization_id == auth.organization_id,
+            AuditLog.action.in_(("stock_inbound", "set_stock")),
+        )
+        .order_by(AuditLog.id.desc())
+        .limit(100)
+        .all()
+    )
+    out: list[StockMovementOut] = []
+    for log in logs:
+        detail = log.detail or ""
+        kind = "inbound" if log.action == "stock_inbound" else "set"
+        qty = Decimal("0")
+        m = re.search(r"[+](\d+(?:\.\d+)?)", detail) or re.search(r"qty=(\d+(?:\.\d+)?)", detail)
+        if m:
+            try:
+                qty = Decimal(m.group(1))
+            except Exception:
+                pass
+        out.append(
+            StockMovementOut(
+                id=log.id,
+                stock_balance_id=stock_id,
+                product_id=row.product_id,
+                warehouse_id=row.warehouse_id,
+                kind=kind,
+                quantity=qty,
+                balance_after=row.quantity or Decimal("0"),
+                batch=None,
+                manufacturer=None,
+                notes=detail or None,
+                created_at=log.created_at,
+            )
+        )
+    return out
+
+
 @router.post("/stock", response_model=StockOut)
 def set_stock(
     body: StockSetIn,
@@ -113,6 +233,7 @@ def set_stock(
         .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == body.product_id)
         .first()
     )
+    prev = row.quantity if row else Decimal("0")
     if row:
         row.quantity = body.quantity
     else:
@@ -125,6 +246,8 @@ def set_stock(
         )
         db.add(row)
     db.flush()
+    delta = body.quantity - (prev or Decimal("0"))
+    _record_movement(db, auth=auth, company_id=company_id, row=row, kind="set", quantity=delta)
     write_audit(
         db,
         action="set_stock",
@@ -134,6 +257,72 @@ def set_stock(
         company_id=company_id,
         user_id=auth.user.id,
         detail=f"product={body.product_id} qty={body.quantity}",
+    )
+    db.commit()
+    db.refresh(row)
+    return row
+
+
+@router.post("/stock/inbound", response_model=StockOut)
+def stock_inbound(
+    body: StockInwardIn,
+    auth: AuthContext = Depends(require_perms("inventory.edit")),
+    db: Session = Depends(get_db),
+):
+    """Add quantity to on-hand (stock inward)."""
+    if body.quantity <= 0:
+        raise HTTPException(status_code=400, detail="Quantity must be positive")
+    company_id = auth.require_company()
+    warehouse_id = body.warehouse_id
+    if warehouse_id is None:
+        warehouse_id = _default_warehouse(db, company_id, auth.organization_id).id
+    else:
+        wh = (
+            db.query(Warehouse)
+            .filter(Warehouse.id == warehouse_id, Warehouse.company_id == company_id)
+            .first()
+        )
+        if not wh:
+            raise HTTPException(status_code=404, detail="Warehouse not found")
+
+    row = (
+        db.query(StockBalance)
+        .filter(StockBalance.warehouse_id == warehouse_id, StockBalance.product_id == body.product_id)
+        .first()
+    )
+    if row:
+        row.quantity = (row.quantity or 0) + body.quantity
+    else:
+        row = StockBalance(
+            organization_id=auth.organization_id,
+            company_id=company_id,
+            warehouse_id=warehouse_id,
+            product_id=body.product_id,
+            quantity=body.quantity,
+        )
+        db.add(row)
+    db.flush()
+    _record_movement(
+        db,
+        auth=auth,
+        company_id=company_id,
+        row=row,
+        kind="inbound",
+        quantity=body.quantity,
+        batch=body.batch,
+        manufacturer=body.manufacturer,
+        notes=body.notes,
+    )
+    meta = " · ".join(x for x in [body.batch, body.manufacturer, body.notes] if x)
+    write_audit(
+        db,
+        action="stock_inbound",
+        entity_type="stock_balance",
+        entity_id=row.id,
+        organization_id=auth.organization_id,
+        company_id=company_id,
+        user_id=auth.user.id,
+        detail=f"product={body.product_id} +{body.quantity}" + (f" · {meta}" if meta else ""),
     )
     db.commit()
     db.refresh(row)

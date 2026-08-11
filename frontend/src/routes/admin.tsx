@@ -531,8 +531,8 @@ function Admin() {
                         {u.is_active ? "Off" : "On"}
                       </button>
                     </td>
-                  </tr>
-                ))}
+            </tr>
+          ))}
               </tbody>
             </table>
           </div>

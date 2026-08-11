@@ -97,7 +97,7 @@ def get_auth(
 
 def require_perms(*codes: str):
     def _dep(auth: AuthContext = Depends(get_auth)) -> AuthContext:
-        if auth.role == RoleName.SUPER_ADMIN:
+        if auth.role in (RoleName.SUPER_ADMIN, RoleName.OWNER):
             return auth
         for code in codes:
             if code not in auth.permissions:

@@ -258,6 +258,70 @@ class StockBalance(Base):
     )
 
 
+class StockMovement(Base):
+    """ponytail: inbound/set ledger for stock detail history (batch + manufacturer)."""
+
+    __tablename__ = "stock_movements"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    stock_balance_id: Mapped[int] = mapped_column(ForeignKey("stock_balances.id"), nullable=False)
+    product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
+    warehouse_id: Mapped[int] = mapped_column(ForeignKey("warehouses.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # inbound | set
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    balance_after: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    batch: Mapped[str | None] = mapped_column(String(80))
+    manufacturer: Mapped[str | None] = mapped_column(String(200))
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Purchase(Base):
+    """Purchase bill / PO linked to a customer (e.g. sales referral fulfilment)."""
+
+    __tablename__ = "purchases"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    source: Mapped[str] = mapped_column(String(40), default="direct")  # sales_referral | direct | manufacturer | other
+    manufacturer: Mapped[str | None] = mapped_column(String(200))
+    product: Mapped[str] = mapped_column(String(200), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    received: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
+    value: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    eta: Mapped[str | None] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(40), default="Confirmed")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Dispatch(Base):
+    """Load / dispatch movement from warehouse to customer."""
+
+    __tablename__ = "dispatches"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    product: Mapped[str] = mapped_column(String(200), nullable=False)
+    quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    vehicle: Mapped[str | None] = mapped_column(String(80))
+    transporter: Mapped[str | None] = mapped_column(String(120))
+    lr: Mapped[str | None] = mapped_column(String(80))
+    eta: Mapped[str | None] = mapped_column(String(40))
+    status: Mapped[str] = mapped_column(String(40), default="Pending")
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Quotation(Base):
     __tablename__ = "quotations"
 
