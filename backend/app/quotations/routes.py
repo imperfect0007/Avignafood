@@ -8,6 +8,7 @@ from app.core.database import get_db
 from app.core.deps import AuthContext, require_owner, require_perms
 from app.core.models import Product, Quotation, QuotationLine, QuotationStatus
 from app.core.schemas import QuotationCreate, QuotationOut
+from app.sales.ops import open_confirmed_from_quotation
 
 router = APIRouter(prefix="/quotations", tags=["quotations"])
 
@@ -93,6 +94,10 @@ def create_quotation(
         )
 
     q.status = QuotationStatus.PENDING_APPROVAL if needs_approval else QuotationStatus.APPROVED
+    if q.status == QuotationStatus.APPROVED:
+        so = open_confirmed_from_quotation(db, auth=auth, quotation=q)
+        if so:
+            q.status = QuotationStatus.CONVERTED
 
     write_audit(
         db,
@@ -131,6 +136,9 @@ def approve_quotation(
     if q.status != QuotationStatus.PENDING_APPROVAL:
         raise HTTPException(status_code=400, detail="Quotation is not pending approval")
     q.status = QuotationStatus.APPROVED
+    so = open_confirmed_from_quotation(db, auth=auth, quotation=q)
+    if so:
+        q.status = QuotationStatus.CONVERTED
     write_audit(
         db,
         action="approve",
@@ -139,6 +147,7 @@ def approve_quotation(
         organization_id=auth.organization_id,
         company_id=company_id,
         user_id=auth.user.id,
+        detail=f"sales_order={so.id if so else None}",
     )
     db.commit()
     q = db.query(Quotation).options(joinedload(Quotation.lines)).filter(Quotation.id == q.id).first()

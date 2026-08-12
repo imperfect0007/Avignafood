@@ -2,6 +2,7 @@ from datetime import date, timedelta
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.audit.service import write_audit
@@ -10,6 +11,7 @@ from app.core.deps import AuthContext, require_perms
 from app.core.models import (
     Company,
     Customer,
+    Dispatch,
     Invoice,
     InvoiceLine,
     InvoiceStatus,
@@ -17,18 +19,28 @@ from app.core.models import (
     SalesOrder,
     SalesOrderStatus,
 )
-from app.core.schemas import InvoiceOut
+from app.core.schemas import BillableLoadOut, ClientAccountOut, ClientLedgerOut, InvoiceOut
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
+# Invoice once the load is almost leaving (or already gone, if billing lagged)
+NEAR_DISPATCH = ("Packed", "Ready", "Dispatched", "Delivered")
 
-def _out(inv: Invoice) -> InvoiceOut:
+
+def _out(inv: Invoice, customer: Customer | None = None) -> InvoiceOut:
     outstanding = inv.total - inv.amount_paid
+    credit_days = None
+    if inv.due_date and inv.invoice_date:
+        credit_days = (inv.due_date - inv.invoice_date).days
+    elif customer:
+        credit_days = customer.credit_days
     return InvoiceOut(
         id=inv.id,
         company_id=inv.company_id,
         customer_id=inv.customer_id,
+        customer_name=customer.name if customer else None,
         sales_order_id=inv.sales_order_id,
+        dispatch_id=inv.dispatch_id,
         number=inv.number,
         invoice_date=inv.invoice_date,
         due_date=inv.due_date,
@@ -38,6 +50,7 @@ def _out(inv: Invoice) -> InvoiceOut:
         total=inv.total,
         amount_paid=inv.amount_paid,
         outstanding=outstanding,
+        credit_days=credit_days,
         lines=[
             {
                 "id": ln.id,
@@ -50,6 +63,51 @@ def _out(inv: Invoice) -> InvoiceOut:
             for ln in inv.lines
         ],
     )
+
+
+def _next_number(db: Session, company: Company) -> str:
+    count = db.query(Invoice).filter(Invoice.company_id == company.id).count() + 1
+    return f"{company.invoice_prefix}-{count:05d}"
+
+
+def _match_product(db: Session, company_id: int, name: str) -> Product | None:
+    q = name.strip()
+    if not q:
+        return None
+    exact = (
+        db.query(Product)
+        .filter(Product.company_id == company_id, Product.is_active.is_(True), func.lower(Product.name) == q.lower())
+        .first()
+    )
+    if exact:
+        return exact
+    return (
+        db.query(Product)
+        .filter(Product.company_id == company_id, Product.is_active.is_(True), Product.name.ilike(f"%{q}%"))
+        .first()
+    )
+
+
+def _price_for_dispatch(db: Session, company_id: int, load: Dispatch) -> tuple[Product | None, Decimal]:
+    product = _match_product(db, company_id, load.product)
+    if product:
+        return product, product.base_price or Decimal("0")
+    so = (
+        db.query(SalesOrder)
+        .options(joinedload(SalesOrder.lines))
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.customer_id == load.customer_id,
+            SalesOrder.status.in_([SalesOrderStatus.CONFIRMED, SalesOrderStatus.INVOICED]),
+        )
+        .order_by(SalesOrder.id.desc())
+        .first()
+    )
+    if so and so.lines:
+        ln = so.lines[0]
+        p = db.query(Product).filter(Product.id == ln.product_id).first()
+        return p, ln.unit_price
+    return None, Decimal("0")
 
 
 @router.get("", response_model=list[InvoiceOut])
@@ -65,7 +123,300 @@ def list_invoices(
         .order_by(Invoice.id.desc())
         .all()
     )
-    return [_out(r) for r in rows]
+    customers = {
+        c.id: c
+        for c in db.query(Customer).filter(Customer.company_id == company_id).all()
+    }
+    return [_out(r, customers.get(r.customer_id)) for r in rows]
+
+
+def _invoiced_dispatch_ids(db: Session, company_id: int) -> set[int]:
+    return {
+        r[0]
+        for r in db.query(Invoice.dispatch_id)
+        .filter(Invoice.company_id == company_id, Invoice.dispatch_id.isnot(None))
+        .all()
+        if r[0]
+    }
+
+
+def _notice(
+    db: Session,
+    company_id: int,
+    load: Dispatch,
+    customers: dict[int, Customer],
+    invoiced_ids: set[int],
+) -> BillableLoadOut:
+    cust = customers.get(load.customer_id)
+    product, unit_price = _price_for_dispatch(db, company_id, load)
+    qty = load.quantity or Decimal("0")
+    gst = product.gst_rate if product else Decimal("0")
+    est = qty * unit_price * (Decimal("1") + gst / Decimal("100"))
+    invoiced = load.id in invoiced_ids
+    return BillableLoadOut(
+        dispatch_id=load.id,
+        customer_id=load.customer_id,
+        customer_name=cust.name if cust else f"Customer #{load.customer_id}",
+        product=load.product,
+        quantity=qty,
+        unit_price=unit_price,
+        estimated_total=est,
+        dispatch_status=load.status,
+        vehicle=load.vehicle,
+        lr=load.lr,
+        eta=load.eta,
+        notes=load.notes,
+        invoiced=invoiced,
+        can_invoice=(not invoiced) and load.status in NEAR_DISPATCH,
+    )
+
+
+def _list_notices(db: Session, company_id: int, org_id: int) -> list[BillableLoadOut]:
+    invoiced_ids = _invoiced_dispatch_ids(db, company_id)
+    loads = (
+        db.query(Dispatch)
+        .filter(Dispatch.company_id == company_id, Dispatch.organization_id == org_id)
+        .order_by(Dispatch.id.desc())
+        .all()
+    )
+    customers = {c.id: c for c in db.query(Customer).filter(Customer.company_id == company_id).all()}
+    return [_notice(db, company_id, load, customers, invoiced_ids) for load in loads]
+
+
+@router.get("/dispatch-inbox", response_model=list[BillableLoadOut])
+def dispatch_inbox(
+    auth: AuthContext = Depends(require_perms("invoices.view")),
+    db: Session = Depends(get_db),
+):
+    """All dispatch loads Accounts should see — info arrives here before invoicing."""
+    company_id = auth.require_company()
+    return _list_notices(db, company_id, auth.organization_id)
+
+
+@router.get("/billable", response_model=list[BillableLoadOut])
+def billable_loads(
+    auth: AuthContext = Depends(require_perms("invoices.view")),
+    db: Session = Depends(get_db),
+):
+    """Loads near dispatch that do not yet have an invoice — Accounts' work queue."""
+    company_id = auth.require_company()
+    return [n for n in _list_notices(db, company_id, auth.organization_id) if n.can_invoice]
+
+
+@router.post("/from-dispatch/{dispatch_id}", response_model=InvoiceOut)
+def invoice_from_dispatch(
+    dispatch_id: int,
+    auth: AuthContext = Depends(require_perms("invoices.create")),
+    db: Session = Depends(get_db),
+):
+    company_id = auth.require_company()
+    load = (
+        db.query(Dispatch)
+        .filter(
+            Dispatch.id == dispatch_id,
+            Dispatch.company_id == company_id,
+            Dispatch.organization_id == auth.organization_id,
+        )
+        .first()
+    )
+    if not load:
+        raise HTTPException(status_code=404, detail="Dispatch not found")
+    if load.status not in NEAR_DISPATCH:
+        raise HTTPException(
+            status_code=400,
+            detail="Invoice only when the load is Packed / Ready / Dispatched / Delivered",
+        )
+    existing = db.query(Invoice).filter(Invoice.dispatch_id == load.id).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Invoice already exists for this load")
+
+    company = db.query(Company).filter(Company.id == company_id).first()
+    customer = db.query(Customer).filter(Customer.id == load.customer_id).first()
+    if not company or not customer:
+        raise HTTPException(status_code=400, detail="Company or customer missing")
+
+    product, unit_price = _price_for_dispatch(db, company_id, load)
+    if not product:
+        raise HTTPException(
+            status_code=400,
+            detail="No matching product master for this load — cannot invoice",
+        )
+    if unit_price <= 0:
+        raise HTTPException(
+            status_code=400,
+            detail="No price on file for this product — set base price on the product master first",
+        )
+    gst_rate = product.gst_rate or Decimal("0")
+    qty = load.quantity or Decimal("0")
+    if qty <= 0:
+        raise HTTPException(status_code=400, detail="Load quantity must be positive")
+
+    inv = Invoice(
+        organization_id=auth.organization_id,
+        company_id=company_id,
+        customer_id=load.customer_id,
+        dispatch_id=load.id,
+        sales_order_id=load.sales_order_id,
+        number=_next_number(db, company),
+        invoice_date=date.today(),
+        due_date=date.today() + timedelta(days=customer.credit_days or 30),
+        status=InvoiceStatus.OPEN,
+    )
+    db.add(inv)
+    db.flush()
+
+    line_sub = qty * unit_price
+    line_tax = line_sub * gst_rate / Decimal("100")
+    db.add(
+        InvoiceLine(
+            invoice_id=inv.id,
+            product_id=product.id,
+            quantity=qty,
+            unit_price=unit_price,
+            gst_rate=gst_rate,
+            line_total=line_sub + line_tax,
+        )
+    )
+    inv.subtotal = line_sub
+    inv.tax_amount = line_tax
+    inv.total = line_sub + line_tax
+
+    if load.sales_order_id:
+        so = (
+            db.query(SalesOrder)
+            .filter(SalesOrder.id == load.sales_order_id, SalesOrder.company_id == company_id)
+            .first()
+        )
+        if so:
+            so.status = SalesOrderStatus.INVOICED
+            so.ops_status = "dispatched"
+
+    write_audit(
+        db,
+        action="create",
+        entity_type="invoice",
+        entity_id=inv.id,
+        organization_id=auth.organization_id,
+        company_id=company_id,
+        user_id=auth.user.id,
+        detail=f"{inv.number} dispatch={load.id}",
+    )
+    db.commit()
+    inv = db.query(Invoice).options(joinedload(Invoice.lines)).filter(Invoice.id == inv.id).first()
+    return _out(inv, customer)
+
+
+@router.get("/clients", response_model=list[ClientAccountOut])
+def list_client_accounts(
+    auth: AuthContext = Depends(require_perms("invoices.view")),
+    db: Session = Depends(get_db),
+):
+    company_id = auth.require_company()
+    customers = (
+        db.query(Customer)
+        .filter(Customer.company_id == company_id, Customer.organization_id == auth.organization_id)
+        .order_by(Customer.name)
+        .all()
+    )
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.company_id == company_id, Invoice.status != InvoiceStatus.CANCELLED)
+        .all()
+    )
+    fulfilled = (
+        db.query(Dispatch.customer_id, func.count(Dispatch.id))
+        .filter(
+            Dispatch.company_id == company_id,
+            Dispatch.status.in_(("Dispatched", "Delivered")),
+        )
+        .group_by(Dispatch.customer_id)
+        .all()
+    )
+    fulfilled_map = {r[0]: int(r[1]) for r in fulfilled}
+
+    inv_by_cust: dict[int, list[Invoice]] = {}
+    for inv in invoices:
+        inv_by_cust.setdefault(inv.customer_id, []).append(inv)
+
+    out: list[ClientAccountOut] = []
+    for c in customers:
+        rows = inv_by_cust.get(c.id, [])
+        revenue = sum((i.total for i in rows), Decimal("0"))
+        outstanding = sum((i.total - i.amount_paid for i in rows if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)), Decimal("0"))
+        out.append(
+            ClientAccountOut(
+                customer_id=c.id,
+                name=c.name,
+                gstin=c.gstin,
+                phone=c.phone,
+                credit_days=c.credit_days or 0,
+                credit_limit=c.credit_limit or Decimal("0"),
+                orders_fulfilled=fulfilled_map.get(c.id, 0),
+                invoice_count=len(rows),
+                total_revenue=revenue,
+                outstanding=outstanding,
+            )
+        )
+    return out
+
+
+@router.get("/clients/{customer_id}", response_model=ClientLedgerOut)
+def client_ledger(
+    customer_id: int,
+    auth: AuthContext = Depends(require_perms("invoices.view")),
+    db: Session = Depends(get_db),
+):
+    company_id = auth.require_company()
+    customer = (
+        db.query(Customer)
+        .filter(
+            Customer.id == customer_id,
+            Customer.company_id == company_id,
+            Customer.organization_id == auth.organization_id,
+        )
+        .first()
+    )
+    if not customer:
+        raise HTTPException(status_code=404, detail="Customer not found")
+    invs = (
+        db.query(Invoice)
+        .options(joinedload(Invoice.lines))
+        .filter(
+            Invoice.customer_id == customer_id,
+            Invoice.company_id == company_id,
+            Invoice.status != InvoiceStatus.CANCELLED,
+        )
+        .order_by(Invoice.id.desc())
+        .all()
+    )
+    fulfilled = (
+        db.query(func.count(Dispatch.id))
+        .filter(
+            Dispatch.company_id == company_id,
+            Dispatch.customer_id == customer_id,
+            Dispatch.status.in_(("Dispatched", "Delivered")),
+        )
+        .scalar()
+    )
+    revenue = sum((i.total for i in invs), Decimal("0"))
+    outstanding = sum(
+        (i.total - i.amount_paid for i in invs if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)),
+        Decimal("0"),
+    )
+    return ClientLedgerOut(
+        customer_id=customer.id,
+        name=customer.name,
+        gstin=customer.gstin,
+        phone=customer.phone,
+        address=customer.address,
+        credit_days=customer.credit_days or 0,
+        credit_limit=customer.credit_limit or Decimal("0"),
+        orders_fulfilled=int(fulfilled or 0),
+        invoice_count=len(invs),
+        total_revenue=revenue,
+        outstanding=outstanding,
+        invoices=[_out(i, customer) for i in invs],
+    )
 
 
 @router.post("/from-order/{order_id}", response_model=InvoiceOut)
@@ -95,17 +446,12 @@ def invoice_from_order(
 
     company = db.query(Company).filter(Company.id == company_id).first()
     customer = db.query(Customer).filter(Customer.id == so.customer_id).first()
-    count = db.query(Invoice).filter(Invoice.company_id == company_id).count() + 1
-    number = f"{company.invoice_prefix}-{count:05d}"
-
-    subtotal = Decimal("0")
-    tax_amount = Decimal("0")
     inv = Invoice(
         organization_id=auth.organization_id,
         company_id=company_id,
         customer_id=so.customer_id,
         sales_order_id=so.id,
-        number=number,
+        number=_next_number(db, company),
         invoice_date=date.today(),
         due_date=date.today() + timedelta(days=customer.credit_days if customer else 30),
         status=InvoiceStatus.OPEN,
@@ -113,12 +459,13 @@ def invoice_from_order(
     db.add(inv)
     db.flush()
 
+    subtotal = Decimal("0")
+    tax_amount = Decimal("0")
     for ln in so.lines:
         product = db.query(Product).filter(Product.id == ln.product_id).first()
         gst_rate = product.gst_rate if product else Decimal("0")
         line_sub = ln.quantity * ln.unit_price
         line_tax = line_sub * gst_rate / Decimal("100")
-        line_total = line_sub + line_tax
         subtotal += line_sub
         tax_amount += line_tax
         db.add(
@@ -128,7 +475,7 @@ def invoice_from_order(
                 quantity=ln.quantity,
                 unit_price=ln.unit_price,
                 gst_rate=gst_rate,
-                line_total=line_total,
+                line_total=line_sub + line_tax,
             )
         )
 
@@ -144,11 +491,11 @@ def invoice_from_order(
         organization_id=auth.organization_id,
         company_id=company_id,
         user_id=auth.user.id,
-        detail=number,
+        detail=inv.number,
     )
     db.commit()
     inv = db.query(Invoice).options(joinedload(Invoice.lines)).filter(Invoice.id == inv.id).first()
-    return _out(inv)
+    return _out(inv, customer)
 
 
 @router.get("/{invoice_id}", response_model=InvoiceOut)
@@ -170,4 +517,5 @@ def get_invoice(
     )
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
-    return _out(inv)
+    customer = db.query(Customer).filter(Customer.id == inv.customer_id).first()
+    return _out(inv, customer)

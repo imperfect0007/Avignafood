@@ -95,9 +95,11 @@ export function VehicleGlance() {
 export function VehicleEditor({
   date,
   onDateChange,
+  onUpdated,
 }: {
   date?: string;
   onDateChange?: (d: string) => void;
+  onUpdated?: () => void;
 } = {}) {
   const [inner, setInner] = useState(date || tomorrowIso);
   const onDate = date ?? inner;
@@ -126,6 +128,7 @@ export function VehicleEditor({
           body: JSON.stringify({ on_date: onDate, slot, status }),
         }),
       );
+      onUpdated?.();
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not update");
     }

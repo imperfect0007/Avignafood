@@ -2,9 +2,8 @@ import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
-import { greeting, money } from "@/lib/format";
+import { greeting } from "@/lib/format";
 import { Badge, Kpi, PageHeader, Panel } from "@/components/erp/ui-bits";
-import { VehicleEditor } from "@/components/erp/VehicleBoard";
 
 type SupervisorDash = {
   today_sales: string;
@@ -46,14 +45,18 @@ export function SupervisorDashboard() {
     <>
       <PageHeader
         title={`${greeting()}, ${name}`}
-        subtitle="Sales team + warehouse — approvals, stock, pick/pack, ready for logistics. No vehicle/driver or payments."
+        subtitle="Collect confirmed orders → verify stock → procure if short → allocate & book a vehicle window. Accounts invoices after dispatch."
       />
 
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Today's sales" value={data ? money(data.today_sales) : "—"} tone="good" />
-        <Kpi label="Monthly sales" value={data ? money(data.month_sales) : "—"} />
+        <Kpi
+          label="Pending orders"
+          value={data ? String(data.pending_orders) : "—"}
+          tone={data && data.pending_orders > 0 ? "warn" : "good"}
+        />
+        <Kpi label="Confirmed" value={data ? String(data.confirmed_orders) : "—"} />
         <Kpi
           label="Pending approvals"
           value={data ? String(data.pending_approvals) : "—"}
@@ -62,7 +65,7 @@ export function SupervisorDashboard() {
         <Kpi
           label="Ready for dispatch"
           value={data ? String(data.ready_for_dispatch) : "—"}
-          meta="Hand off to logistics"
+          meta="Book a window on Order desk"
           tone={data && data.ready_for_dispatch > 0 ? "warn" : "default"}
         />
       </div>
@@ -71,11 +74,7 @@ export function SupervisorDashboard() {
         Warehouse
       </h2>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi
-          label="Total stock"
-          value={data ? qty(data.total_stock_qty) : "—"}
-          meta={data ? money(data.inventory_value) : undefined}
-        />
+        <Kpi label="Total stock" value={data ? qty(data.total_stock_qty) : "—"} />
         <Kpi label="Available" value={data ? qty(data.available_stock) : "—"} tone="good" />
         <Kpi
           label="Low stock"
@@ -83,10 +82,6 @@ export function SupervisorDashboard() {
           tone={data && data.low_stock_items > 0 ? "bad" : "good"}
         />
         <Kpi label="Warehouses" value={data ? String(data.warehouses) : "—"} />
-      </div>
-
-      <div className="mt-6">
-        <VehicleEditor />
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
@@ -121,9 +116,12 @@ export function SupervisorDashboard() {
 
         <Panel title="Supervisor workflow">
           <p className="mb-4 text-sm text-muted-foreground">
-            Demand → pick/pack → ready for dispatch. Logistics owns vehicle/driver/POD.
+            After Super Admin approval: verify stock (2nd check) → raise PR if short → receive + batch → allocate, book morning/afternoon/evening for logistics.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
+            <Link to="/ops" className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium hover:bg-primary/10">
+              Order desk →
+            </Link>
             <Link to="/inventory" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
               Warehouse & stock →
             </Link>
@@ -133,14 +131,8 @@ export function SupervisorDashboard() {
             <Link to="/sales" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
               Orders & approvals →
             </Link>
-            <Link to="/dispatch" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
-              Dispatch prep →
-            </Link>
             <Link to="/leads" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
               Sales team leads →
-            </Link>
-            <Link to="/receivables" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
-              Credit (monitor) →
             </Link>
           </div>
         </Panel>

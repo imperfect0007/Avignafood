@@ -86,6 +86,21 @@ def availability(
     return _avail(db, v, on_date)
 
 
+@router.get("/availability/all", response_model=list[VehicleAvailOut])
+def availability_all(
+    on_date: date = Query(...),
+    auth: AuthContext = Depends(require_perms("vehicles.view")),
+    db: Session = Depends(get_db),
+):
+    rows = (
+        db.query(Vehicle)
+        .filter(Vehicle.organization_id == auth.organization_id, Vehicle.is_active.is_(True))
+        .order_by(Vehicle.id)
+        .all()
+    )
+    return [_avail(db, v, on_date) for v in rows]
+
+
 @router.put("/{vehicle_id}/live", response_model=VehicleOut)
 def set_live(
     vehicle_id: int,

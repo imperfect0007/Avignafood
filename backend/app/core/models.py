@@ -299,6 +299,8 @@ class Purchase(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("sales_orders.id"))
+    product_id: Mapped[int | None] = mapped_column(ForeignKey("products.id"))
 
 
 class Dispatch(Base):
@@ -320,6 +322,9 @@ class Dispatch(Base):
     notes: Mapped[str | None] = mapped_column(Text)
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("sales_orders.id"))
+    slot_date: Mapped[date | None] = mapped_column(Date)
+    slot: Mapped[str | None] = mapped_column(String(20))  # morning | afternoon | evening
 
 
 class Quotation(Base):
@@ -369,6 +374,8 @@ class SalesOrder(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ops_status: Mapped[str] = mapped_column(String(40), default="pending_verify")
+    # pending_verify | shortage | procuring | ready | allocated | dispatched
 
     lines: Mapped[list["SalesOrderLine"]] = relationship(back_populates="sales_order", cascade="all, delete-orphan")
 
@@ -393,6 +400,7 @@ class Invoice(Base):
     company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
     customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
     sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("sales_orders.id"))
+    dispatch_id: Mapped[int | None] = mapped_column(ForeignKey("dispatches.id"))
     number: Mapped[str] = mapped_column(String(40), nullable=False)
     invoice_date: Mapped[date] = mapped_column(Date, nullable=False)
     due_date: Mapped[date | None] = mapped_column(Date)

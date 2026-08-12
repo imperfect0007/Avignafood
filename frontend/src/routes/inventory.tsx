@@ -649,7 +649,7 @@ function Inventory() {
               </button>
             </div>
           </form>
-        </div>
+      </div>
       )}
     </>
   );

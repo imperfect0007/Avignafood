@@ -93,7 +93,7 @@ const ROLE_CATALOG = [
   { id: "owner", label: "Owner", scope: "Full business · config & approvals" },
   { id: "supervisor", label: "Supervisor", scope: "Sales ops + warehouse · no payments" },
   { id: "sales", label: "Sales", scope: "Own leads, quotes, orders · view stock" },
-  { id: "accountant", label: "Accounts", scope: "Invoices, payments, receivables" },
+  { id: "accountant", label: "Accounts", scope: "Invoices, receivables, per-client billing" },
   { id: "logistics", label: "Logistics", scope: "Dispatch transport · no stock edits" },
 ];
 

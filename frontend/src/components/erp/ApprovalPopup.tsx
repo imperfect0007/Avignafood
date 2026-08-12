@@ -8,7 +8,9 @@ import { money } from "@/lib/format";
 export type PendingItem = {
   key: string;
   source: "api" | "mock";
+  kind?: "quote" | "purchase";
   quoteId?: number;
+  purchaseId?: number;
   customer: string;
   product: string;
   qty: string;
@@ -23,6 +25,16 @@ type Quote = {
   status: string;
   notes: string | null;
   lines: { product_id: number; quantity: number; unit_price: number; base_price: number }[];
+};
+
+type Purchase = {
+  id: number;
+  customer_id: number;
+  product: string;
+  quantity: string | number;
+  status: string;
+  sales_order_id?: number | null;
+  manufacturer?: string | null;
 };
 
 type Customer = { id: number; name: string };
@@ -44,18 +56,20 @@ export function usePendingApprovals() {
     setLoading(true);
     const dismissed = new Set(JSON.parse(sessionStorage.getItem("approvalDismissed") || "[]") as string[]);
     try {
-      const [quotes, customers] = await Promise.all([
+      const [quotes, purchases, customers] = await Promise.all([
         api<Quote[]>("/api/v1/quotations").catch(() => [] as Quote[]),
+        api<Purchase[]>("/api/v1/purchases").catch(() => [] as Purchase[]),
         api<Customer[]>("/api/v1/customers").catch(() => [] as Customer[]),
       ]);
       const names = Object.fromEntries(customers.map((c) => [c.id, c.name]));
-      const fromApi: PendingItem[] = quotes
+      const quoteItems: PendingItem[] = quotes
         .filter((q) => q.status === "pending_approval")
         .map((q) => {
           const line = q.lines[0];
           return {
             key: `q-${q.id}`,
             source: "api" as const,
+            kind: "quote" as const,
             quoteId: q.id,
             customer: names[q.customer_id] || `Customer #${q.customer_id}`,
             product: line ? `Product #${line.product_id}` : "Quotation",
@@ -65,6 +79,21 @@ export function usePendingApprovals() {
             salesperson: "Sales",
           };
         });
+      const purchaseItems: PendingItem[] = purchases
+        .filter((p) => p.status === "pending_approval")
+        .map((p) => ({
+          key: `p-${p.id}`,
+          source: "api" as const,
+          kind: "purchase" as const,
+          purchaseId: p.id,
+          customer: names[p.customer_id] || `Customer #${p.customer_id}`,
+          product: p.product || "Purchase requirement",
+          qty: String(p.quantity ?? "—"),
+          asked: 0,
+          floor: 0,
+          salesperson: p.sales_order_id ? `SO-${p.sales_order_id}` : p.manufacturer || "Supervisor",
+        }));
+      const fromApi: PendingItem[] = [...quoteItems, ...purchaseItems];
 
       // Demo fallback so popup still shows with seed mock data
       const fromMock: PendingItem[] = byFirm(approvals, firm)
@@ -124,7 +153,9 @@ export function ApprovalPopup({
     setBusy(current.key);
     setError("");
     try {
-      if (current.source === "api" && current.quoteId) {
+      if (current.source === "api" && current.purchaseId) {
+        await api(`/api/v1/purchases/${current.purchaseId}/${action}`, { method: "POST" });
+      } else if (current.source === "api" && current.quoteId) {
         await api(`/api/v1/quotations/${current.quoteId}/${action}`, { method: "POST" });
       }
       onDecided(current.key, action);
@@ -147,13 +178,15 @@ export function ApprovalPopup({
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border sm:hidden" />
         <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
-          Price approval · {items.length} waiting
+          {current.kind === "purchase" ? "Purchase requirement" : "Price approval"} · {items.length} waiting
         </p>
         <h2 id="approval-title" className="mt-1 text-xl font-semibold tracking-tight">
           {current.customer}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {current.salesperson} · below floor rate
+          {current.kind === "purchase"
+            ? `${current.salesperson} · manufacturer stock`
+            : `${current.salesperson} · below floor rate`}
         </p>
 
         <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
@@ -165,19 +198,39 @@ export function ApprovalPopup({
             <dt className="text-xs text-muted-foreground">Qty</dt>
             <dd className="mt-0.5 font-medium tabular-nums">{current.qty}</dd>
           </div>
-          <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
-            <dt className="text-xs text-muted-foreground">Asked</dt>
-            <dd className="mt-0.5 font-medium tabular-nums text-warning">{money(current.asked)}</dd>
-          </div>
-          <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
-            <dt className="text-xs text-muted-foreground">Floor</dt>
-            <dd className="mt-0.5 font-medium tabular-nums">{money(current.floor)}</dd>
-          </div>
+          {current.kind === "purchase" ? (
+            <>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Type</dt>
+                <dd className="mt-0.5 font-medium">Purchase requirement</dd>
+              </div>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Ref</dt>
+                <dd className="mt-0.5 font-medium">{current.salesperson}</dd>
+              </div>
+            </>
+          ) : (
+            <>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Asked</dt>
+                <dd className="mt-0.5 font-medium tabular-nums text-warning">{money(current.asked)}</dd>
+              </div>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Floor</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">{money(current.floor)}</dd>
+              </div>
+            </>
+          )}
         </dl>
 
-        {current.asked < current.floor && (
+        {current.kind !== "purchase" && current.asked < current.floor && (
           <p className="mt-3 text-xs text-destructive">
             {inr(current.floor - current.asked)} below floor
+          </p>
+        )}
+        {current.kind === "purchase" && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Approve so Supervisor can receive from the manufacturer and book inward + batch.
           </p>
         )}
         {error && <p className="mt-2 text-sm text-destructive">{error}</p>}

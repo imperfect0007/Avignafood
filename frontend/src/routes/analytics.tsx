@@ -1,7 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
+import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, Cell, Line, LineChart, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company-context";
+import { useMe } from "@/lib/me-context";
 import { byFirm, customers, firms, inr, kpisByFirm, kpisFor, monthlyRevenue } from "@/lib/erp-data";
+import { money } from "@/lib/format";
 import { Kpi, PageHeader, Panel, Table, Td } from "@/components/erp/ui-bits";
 
 export const Route = createFileRoute("/analytics")({
@@ -18,7 +22,74 @@ export const Route = createFileRoute("/analytics")({
 
 const palette = ["var(--color-chart-1)", "var(--color-chart-2)", "var(--color-chart-3)", "var(--color-chart-4)"];
 
+type ClientRow = {
+  customer_id: number;
+  name: string;
+  orders_fulfilled: number;
+  invoice_count: number;
+  total_revenue: string | number;
+  outstanding: string | number;
+};
+
+function AccountsAnalytics() {
+  const [rows, setRows] = useState<ClientRow[]>([]);
+  useEffect(() => {
+    api<ClientRow[]>("/api/v1/invoices/clients").then(setRows).catch(() => setRows([]));
+  }, []);
+  const revenue = rows.reduce((a, r) => a + Number(r.total_revenue || 0), 0);
+  const outstanding = rows.reduce((a, r) => a + Number(r.outstanding || 0), 0);
+  const fulfilled = rows.reduce((a, r) => a + r.orders_fulfilled, 0);
+  const chart = [...rows]
+    .sort((a, b) => Number(b.total_revenue) - Number(a.total_revenue))
+    .slice(0, 8)
+    .map((c) => ({ name: c.name.split(" ")[0], value: Number(c.total_revenue) / 100000, orders: c.orders_fulfilled }));
+
+  return (
+    <>
+      <PageHeader title="Billing analytics" subtitle="Per-client revenue and receivables from invoices raised here. Tally Prime remains the books." />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+        <Kpi label="Billed revenue" value={money(revenue)} tone="good" />
+        <Kpi label="Outstanding" value={money(outstanding)} tone="warn" />
+        <Kpi label="Orders fulfilled" value={String(fulfilled)} />
+        <Kpi label="Clients billed" value={String(rows.filter((r) => r.invoice_count > 0).length)} />
+      </div>
+      <div className="mt-6 grid gap-4 lg:grid-cols-2">
+        <Panel title="Revenue by client" hint="₹ lakh">
+          <div className="h-60">
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={chart} layout="vertical" margin={{ left: 10, right: 8 }}>
+                <CartesianGrid horizontal={false} stroke="var(--color-border)" />
+                <XAxis type="number" tickLine={false} axisLine={false} fontSize={12} stroke="var(--color-muted-foreground)" />
+                <YAxis type="category" dataKey="name" width={80} tickLine={false} axisLine={false} fontSize={12} stroke="var(--color-muted-foreground)" />
+                <Tooltip contentStyle={{ borderRadius: 12, border: "1px solid var(--color-border)", background: "var(--color-card)" }} />
+                <Bar dataKey="value" fill="var(--color-chart-1)" radius={[0, 6, 6, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        </Panel>
+        <Panel title="Client billing">
+          <Table head={["Client", "Fulfilled", "Invoices", "Revenue", "Outstanding"]}>
+            {rows.map((c) => (
+              <tr key={c.customer_id}>
+                <Td className="font-medium">{c.name}</Td>
+                <Td className="tabular-nums">{c.orders_fulfilled}</Td>
+                <Td className="tabular-nums">{c.invoice_count}</Td>
+                <Td className="tabular-nums">{money(c.total_revenue)}</Td>
+                <Td className="tabular-nums">{money(c.outstanding)}</Td>
+              </tr>
+            ))}
+          </Table>
+          {!rows.length && <p className="mt-3 text-sm text-muted-foreground">No billing data yet.</p>}
+        </Panel>
+      </div>
+    </>
+  );
+}
+
 function Analytics() {
+  const { me } = useMe();
+  if (me?.user.role === "accountant") return <AccountsAnalytics />;
+
   const { firm } = useCompany();
   const k = kpisFor(firm);
   const custRows = byFirm(customers, firm);

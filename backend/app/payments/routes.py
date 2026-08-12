@@ -7,10 +7,23 @@ from sqlalchemy.orm import Session
 from app.audit.service import write_audit
 from app.core.database import get_db
 from app.core.deps import AuthContext, require_perms
-from app.core.models import Invoice, InvoiceStatus, Payment
+from app.core.models import Customer, Invoice, InvoiceStatus, Payment
 from app.core.schemas import PaymentCreate, PaymentOut
 
 router = APIRouter(prefix="/payments", tags=["payments"])
+
+
+def _out(p: Payment, inv: Invoice | None = None, customer: Customer | None = None) -> PaymentOut:
+    return PaymentOut(
+        id=p.id,
+        invoice_id=p.invoice_id,
+        invoice_number=inv.number if inv else None,
+        customer_name=customer.name if customer else None,
+        amount=p.amount,
+        method=p.method,
+        reference=p.reference,
+        paid_at=p.paid_at,
+    )
 
 
 @router.get("", response_model=list[PaymentOut])
@@ -19,12 +32,26 @@ def list_payments(
     db: Session = Depends(get_db),
 ):
     company_id = auth.require_company()
-    return (
+    rows = (
         db.query(Payment)
         .filter(Payment.company_id == company_id, Payment.organization_id == auth.organization_id)
         .order_by(Payment.id.desc())
         .all()
     )
+    invs = {
+        i.id: i
+        for i in db.query(Invoice).filter(Invoice.company_id == company_id).all()
+    }
+    customers = {
+        c.id: c
+        for c in db.query(Customer).filter(Customer.company_id == company_id).all()
+    }
+    out: list[PaymentOut] = []
+    for p in rows:
+        inv = invs.get(p.invoice_id)
+        cust = customers.get(inv.customer_id) if inv else None
+        out.append(_out(p, inv, cust))
+    return out
 
 
 @router.post("", response_model=PaymentOut)
@@ -83,4 +110,5 @@ def create_payment(
     )
     db.commit()
     db.refresh(payment)
-    return payment
+    customer = db.query(Customer).filter(Customer.id == inv.customer_id).first()
+    return _out(payment, inv, customer)

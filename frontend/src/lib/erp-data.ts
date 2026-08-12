@@ -279,7 +279,7 @@ export const roles = [
   { role: "Salesperson", firms: "Firm 1", scope: "Own leads, visits, quotations ? no inventory edits" },
   { role: "Warehouse Staff", firms: "Firm 1, Firm 3", scope: "Stock inward/outward, dispatch ? no invoices" },
   { role: "Billing Staff", firms: "All firms", scope: "Invoices, e-way bills ? no stock edits" },
-  { role: "Accounts", firms: "All firms", scope: "Payments, receivables ? read-only stock" },
+  { role: "Accounts", firms: "All firms", scope: "Invoices, receivables, per-client billing (Tally Prime for books)" },
 ];
 
 export const byFirm = <T extends { firm: string }>(rows: T[], firm: FirmId) =>

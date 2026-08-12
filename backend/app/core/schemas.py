@@ -290,6 +290,8 @@ class PurchaseCreate(BaseModel):
     eta: str | None = None
     status: str = "Confirmed"
     notes: str | None = None
+    sales_order_id: int | None = None
+    product_id: int | None = None
 
 
 class PurchaseOut(ORMModel):
@@ -307,6 +309,14 @@ class PurchaseOut(ORMModel):
     notes: str | None
     created_at: datetime
     dispatch_id: int | None = None  # set when a load is auto-created
+    sales_order_id: int | None = None
+    product_id: int | None = None
+
+
+class PurchaseReceiveIn(BaseModel):
+    batch: str | None = None
+    manufacturer: str | None = None
+    notes: str | None = None
 
 
 # ---- Dispatch ----
@@ -317,6 +327,9 @@ class DispatchCreate(BaseModel):
     vehicle_id: int | None = None
     vehicle: str | None = None
     transporter: str | None = None
+    sales_order_id: int | None = None
+    slot_date: date | None = None
+    slot: str | None = None
     lr: str | None = None
     eta: str | None = None
     status: str = "Pending"
@@ -348,6 +361,9 @@ class DispatchOut(ORMModel):
     status: str
     notes: str | None
     created_at: datetime
+    sales_order_id: int | None = None
+    slot_date: date | None = None
+    slot: str | None = None
 
 
 # ---- Quotations / Sales ----
@@ -392,6 +408,51 @@ class SalesOrderOut(ORMModel):
     notes: str | None
     lines: list[dict]
     stock_warnings: list[str] = []
+    ops_status: str = "pending_verify"
+    customer_name: str | None = None
+
+
+class OrderDeskLine(BaseModel):
+    product_id: int
+    product_name: str
+    quantity: Decimal
+    unit_price: Decimal
+    on_hand: Decimal
+    ok: bool
+
+
+class OrderDeskOut(BaseModel):
+    id: int
+    customer_id: int
+    customer_name: str
+    quotation_id: int | None = None
+    warehouse_id: int
+    status: str
+    ops_status: str
+    notes: str | None = None
+    confirmed_at: datetime | None = None
+    created_at: datetime | None = None
+    lines: list[OrderDeskLine]
+    stock_ok: bool
+    dispatch_id: int | None = None
+    purchase_id: int | None = None
+    purchase_status: str | None = None
+    slot_date: date | None = None
+    slot: str | None = None
+    vehicle: str | None = None
+
+
+class RaisePurchaseIn(BaseModel):
+    manufacturer: str | None = None
+    notes: str | None = None
+    product_id: int | None = None
+    quantity: Decimal | None = None
+
+
+class AllocateDispatchIn(BaseModel):
+    on_date: date
+    slot: str  # morning | afternoon | evening
+    vehicle_id: int | None = None
 
 
 # ---- Invoices / Payments ----
@@ -399,7 +460,9 @@ class InvoiceOut(ORMModel):
     id: int
     company_id: int
     customer_id: int
+    customer_name: str | None = None
     sales_order_id: int | None
+    dispatch_id: int | None = None
     number: str
     invoice_date: date
     due_date: date | None
@@ -409,7 +472,54 @@ class InvoiceOut(ORMModel):
     total: Decimal
     amount_paid: Decimal
     outstanding: Decimal
+    credit_days: int | None = None
     lines: list[dict] = []
+
+
+class BillableLoadOut(BaseModel):
+    dispatch_id: int
+    customer_id: int
+    customer_name: str
+    product: str
+    quantity: Decimal
+    unit_price: Decimal
+    estimated_total: Decimal
+    dispatch_status: str
+    vehicle: str | None = None
+    lr: str | None = None
+    eta: str | None = None
+    notes: str | None = None
+    sales_order_id: int | None = None
+    invoiced: bool = False
+    can_invoice: bool = False
+
+
+class ClientAccountOut(BaseModel):
+    customer_id: int
+    name: str
+    gstin: str | None = None
+    phone: str | None = None
+    credit_days: int
+    credit_limit: Decimal
+    orders_fulfilled: int
+    invoice_count: int
+    total_revenue: Decimal
+    outstanding: Decimal
+
+
+class ClientLedgerOut(BaseModel):
+    customer_id: int
+    name: str
+    gstin: str | None = None
+    phone: str | None = None
+    address: str | None = None
+    credit_days: int
+    credit_limit: Decimal
+    orders_fulfilled: int
+    invoice_count: int
+    total_revenue: Decimal
+    outstanding: Decimal
+    invoices: list[InvoiceOut] = []
 
 
 class PaymentCreate(BaseModel):
@@ -423,6 +533,8 @@ class PaymentCreate(BaseModel):
 class PaymentOut(ORMModel):
     id: int
     invoice_id: int
+    invoice_number: str | None = None
+    customer_name: str | None = None
     amount: Decimal
     method: str
     reference: str | None

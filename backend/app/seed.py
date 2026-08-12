@@ -38,6 +38,8 @@ PERMISSIONS = [
     ("inventory.edit", "Edit inventory"),
     ("purchases.view", "View purchases"),
     ("purchases.create", "Create purchase bills"),
+    ("purchases.edit", "Receive / update purchases"),
+    ("purchases.approve", "Approve purchase requirements"),
     ("dispatch.view", "View dispatches"),
     ("dispatch.create", "Create dispatches"),
     ("dispatch.edit", "Update dispatch / status"),
@@ -82,6 +84,7 @@ ROLE_PERMS: dict[RoleName, list[str] | str] = {
         "inventory.edit",
         "purchases.view",
         "purchases.create",
+        "purchases.edit",
         "dispatch.view",
         "dispatch.create",
         "dispatch.edit",
@@ -126,19 +129,9 @@ ROLE_PERMS: dict[RoleName, list[str] | str] = {
         "payments.view",
     ],
     RoleName.ACCOUNTANT: [
-        # money full; ops view; no field visits / inventory.edit / admin
+        # billing only — Tally Prime is the books; no ops / CRM
         "dashboard.view",
         "companies.view",
-        "customers.view",
-        "customers.create",
-        "customers.edit",  # billing fields only (enforced later)
-        "leads.view",
-        "products.view",
-        "inventory.view",
-        "purchases.view",
-        "purchases.create",
-        "quotations.view",
-        "sales.view",
         "invoices.view",
         "invoices.create",
         "payments.view",
@@ -216,6 +209,15 @@ def _ensure_logo_column() -> None:
     _ensure_column("field_visits", "sales_order_id", "ALTER TABLE field_visits ADD COLUMN sales_order_id INTEGER")
     _ensure_column("vehicles", "driver_name", "ALTER TABLE vehicles ADD COLUMN driver_name VARCHAR(120)")
     _ensure_column("vehicles", "live_status", "ALTER TABLE vehicles ADD COLUMN live_status VARCHAR(20) DEFAULT 'idle'")
+    _ensure_column("vehicles", "name", "ALTER TABLE vehicles ADD COLUMN name VARCHAR(80) DEFAULT 'Truck'")
+    _ensure_column("vehicles", "kind", "ALTER TABLE vehicles ADD COLUMN kind VARCHAR(40) DEFAULT 'truck'")
+    _ensure_column("invoices", "dispatch_id", "ALTER TABLE invoices ADD COLUMN dispatch_id INTEGER")
+    _ensure_column("sales_orders", "ops_status", "ALTER TABLE sales_orders ADD COLUMN ops_status VARCHAR(40) DEFAULT 'pending_verify'")
+    _ensure_column("purchases", "sales_order_id", "ALTER TABLE purchases ADD COLUMN sales_order_id INTEGER")
+    _ensure_column("purchases", "product_id", "ALTER TABLE purchases ADD COLUMN product_id INTEGER")
+    _ensure_column("dispatches", "sales_order_id", "ALTER TABLE dispatches ADD COLUMN sales_order_id INTEGER")
+    _ensure_column("dispatches", "slot_date", "ALTER TABLE dispatches ADD COLUMN slot_date DATE")
+    _ensure_column("dispatches", "slot", "ALTER TABLE dispatches ADD COLUMN slot VARCHAR(20)")
 
 
 def _sync_company_branding(db) -> None:

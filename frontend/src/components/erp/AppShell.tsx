@@ -3,7 +3,7 @@ import { useEffect, type ReactNode, useState } from "react";
 import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard, Sparkles, Users, Handshake, MapPin, Boxes, Truck, ShoppingCart,
-  ReceiptText, Wallet, BarChart3, Settings, Menu, X, Check, ChevronDown, Bell,
+  ReceiptText, Wallet, BarChart3, Settings, Menu, X, Check, ChevronDown, Bell, ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCompany } from "@/lib/company-context";
@@ -70,6 +70,7 @@ const ownerNav: NavSection[] = [
   {
     group: "Operate",
     items: [
+      { to: "/ops", label: "Order desk", icon: ClipboardList },
       { to: "/inventory", label: "Inventory", icon: Boxes },
       { to: "/purchases", label: "Purchases", icon: ShoppingCart },
       { to: "/dispatch", label: "Dispatch", icon: Truck },
@@ -101,23 +102,14 @@ const navByRole: Record<string, NavSection[]> = {
         { to: "/leads", label: "Leads", icon: Sparkles },
         { to: "/customers", label: "Customers", icon: Users },
         { to: "/sales", label: "Sales & approvals", icon: Handshake },
-        { to: "/field", label: "Field visits", icon: MapPin },
       ],
     },
     {
       group: "Operate",
       items: [
+        { to: "/ops", label: "Order desk", icon: ClipboardList },
         { to: "/inventory", label: "Inventory", icon: Boxes },
         { to: "/purchases", label: "Purchases", icon: ShoppingCart },
-        { to: "/dispatch", label: "Dispatch", icon: Truck },
-      ],
-    },
-    {
-      group: "Money",
-      items: [
-        { to: "/invoices", label: "Invoices", icon: ReceiptText },
-        { to: "/receivables", label: "Receivables", icon: Wallet },
-        { to: "/analytics", label: "Analytics", icon: BarChart3 },
       ],
     },
   ],
@@ -133,22 +125,12 @@ const navByRole: Record<string, NavSection[]> = {
   accountant: [
     { group: "Overview", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
     {
-      group: "Money",
+      group: "Billing",
       items: [
         { to: "/invoices", label: "Invoices", icon: ReceiptText },
-        { to: "/receivables", label: "Receivables", icon: Wallet },
+        { to: "/receivables", label: "Payments & outstanding", icon: Wallet },
+        { to: "/clients", label: "Client accounts", icon: Users },
         { to: "/analytics", label: "Analytics", icon: BarChart3 },
-      ],
-    },
-    {
-      group: "Ops",
-      items: [
-        { to: "/customers", label: "Customers", icon: Users },
-        { to: "/leads", label: "Leads", icon: Sparkles },
-        { to: "/sales", label: "Sales & approvals", icon: Handshake },
-        { to: "/inventory", label: "Inventory", icon: Boxes },
-        { to: "/purchases", label: "Purchases", icon: ShoppingCart },
-        { to: "/dispatch", label: "Dispatch", icon: Truck },
       ],
     },
   ],
@@ -257,10 +239,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { firm } = useCompany();
   const activeFirm = firms.find((f) => f.id === firm);
   const { items, dismiss, canApprove } = usePendingApprovals();
-  const alerts = quietAlerts(firm);
-  const alertBadge =
-    (canApprove ? items.length : 0) +
-    alerts.filter((a) => a.count > 0 && a.tone !== "good").length;
 
   useEffect(() => {
     if (!getToken()) navigate({ to: "/login" });
@@ -280,6 +258,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     [{ group: "Overview", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] }];
   const flat = flattenNav(activeNav);
   const bottomTabs = flat.slice(0, 4);
+  const alerts = quietAlerts(firm).filter((a) => pathAllowed(a.to, activeNav));
+  const alertBadge =
+    (canApprove ? items.length : 0) +
+    alerts.filter((a) => a.count > 0 && a.tone !== "good").length;
 
   // Hide ≠ security, but don't let roles deep-link into modules they shouldn't see
   useEffect(() => {
@@ -463,7 +445,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                         setApprovalOpen(true);
                       }}
                     >
-                      <span>Price approvals waiting</span>
+                      <span>Approvals waiting</span>
                       <Badge tone="warn">{items.length}</Badge>
                     </button>
                   )}
