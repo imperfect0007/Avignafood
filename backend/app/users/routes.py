@@ -25,6 +25,7 @@ def _out(user: User) -> UserOut:
         id=user.id,
         email=user.email,
         full_name=user.full_name,
+        phone=user.phone,
         organization_id=user.organization_id,
         role=user.role.name.value,
         is_active=user.is_active,

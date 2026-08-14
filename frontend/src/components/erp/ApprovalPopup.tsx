@@ -8,9 +8,10 @@ import { money } from "@/lib/format";
 export type PendingItem = {
   key: string;
   source: "api" | "mock";
-  kind?: "quote" | "purchase";
+  kind?: "quote" | "purchase" | "order";
   quoteId?: number;
   purchaseId?: number;
+  orderId?: number;
   customer: string;
   product: string;
   qty: string;
@@ -37,6 +38,15 @@ type Purchase = {
   manufacturer?: string | null;
 };
 
+type Order = {
+  id: number;
+  customer_id: number;
+  customer_name: string | null;
+  status: string;
+  ops_status: string;
+  lines: { product_id: number; quantity: number; unit_price: number }[];
+};
+
 type Customer = { id: number; name: string };
 
 /** Only Owner / Super Admin may approve — not Supervisor or other roles. */
@@ -56,9 +66,10 @@ export function usePendingApprovals() {
     setLoading(true);
     const dismissed = new Set(JSON.parse(sessionStorage.getItem("approvalDismissed") || "[]") as string[]);
     try {
-      const [quotes, purchases, customers] = await Promise.all([
+      const [quotes, purchases, orders, customers] = await Promise.all([
         api<Quote[]>("/api/v1/quotations").catch(() => [] as Quote[]),
         api<Purchase[]>("/api/v1/purchases").catch(() => [] as Purchase[]),
+        api<Order[]>("/api/v1/sales-orders").catch(() => [] as Order[]),
         api<Customer[]>("/api/v1/customers").catch(() => [] as Customer[]),
       ]);
       const names = Object.fromEntries(customers.map((c) => [c.id, c.name]));
@@ -93,7 +104,24 @@ export function usePendingApprovals() {
           floor: 0,
           salesperson: p.sales_order_id ? `SO-${p.sales_order_id}` : p.manufacturer || "Supervisor",
         }));
-      const fromApi: PendingItem[] = [...quoteItems, ...purchaseItems];
+      const orderItems: PendingItem[] = orders
+        .filter((o) => o.status === "draft" && (o.ops_status === "pending_approval" || !o.ops_status))
+        .map((o) => {
+          const line = o.lines[0];
+          return {
+            key: `o-${o.id}`,
+            source: "api" as const,
+            kind: "order" as const,
+            orderId: o.id,
+            customer: o.customer_name || names[o.customer_id] || `Customer #${o.customer_id}`,
+            product: line ? `Product #${line.product_id}` : "Sales order",
+            qty: line ? `${line.quantity}` : "—",
+            asked: line ? Number(line.unit_price) : 0,
+            floor: 0,
+            salesperson: `SO-${o.id}`,
+          };
+        });
+      const fromApi: PendingItem[] = [...orderItems, ...quoteItems, ...purchaseItems];
 
       // Demo fallback so popup still shows with seed mock data
       const fromMock: PendingItem[] = byFirm(approvals, firm)
@@ -153,7 +181,9 @@ export function ApprovalPopup({
     setBusy(current.key);
     setError("");
     try {
-      if (current.source === "api" && current.purchaseId) {
+      if (current.source === "api" && current.orderId) {
+        await api(`/api/v1/sales-orders/${current.orderId}/${action}`, { method: "POST" });
+      } else if (current.source === "api" && current.purchaseId) {
         await api(`/api/v1/purchases/${current.purchaseId}/${action}`, { method: "POST" });
       } else if (current.source === "api" && current.quoteId) {
         await api(`/api/v1/quotations/${current.quoteId}/${action}`, { method: "POST" });
@@ -178,15 +208,22 @@ export function ApprovalPopup({
       >
         <div className="mx-auto mb-3 h-1 w-10 rounded-full bg-border sm:hidden" />
         <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
-          {current.kind === "purchase" ? "Purchase requirement" : "Price approval"} · {items.length} waiting
+          {current.kind === "order"
+            ? "Sales order"
+            : current.kind === "purchase"
+              ? "Purchase requirement"
+              : "Price approval"}{" "}
+          · {items.length} waiting
         </p>
         <h2 id="approval-title" className="mt-1 text-xl font-semibold tracking-tight">
           {current.customer}
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          {current.kind === "purchase"
-            ? `${current.salesperson} · manufacturer stock`
-            : `${current.salesperson} · below floor rate`}
+          {current.kind === "order"
+            ? `${current.salesperson} · Sales created this order`
+            : current.kind === "purchase"
+              ? `${current.salesperson} · manufacturer stock`
+              : `${current.salesperson} · below floor rate`}
         </p>
 
         <dl className="mt-5 grid grid-cols-2 gap-3 text-sm">
@@ -209,6 +246,17 @@ export function ApprovalPopup({
                 <dd className="mt-0.5 font-medium">{current.salesperson}</dd>
               </div>
             </>
+          ) : current.kind === "order" ? (
+            <>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Asked</dt>
+                <dd className="mt-0.5 font-medium tabular-nums">{money(current.asked)}</dd>
+              </div>
+              <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
+                <dt className="text-xs text-muted-foreground">Next</dt>
+                <dd className="mt-0.5 font-medium">Accounts invoice</dd>
+              </div>
+            </>
           ) : (
             <>
               <div className="rounded-xl bg-secondary/60 px-3 py-2.5">
@@ -223,9 +271,14 @@ export function ApprovalPopup({
           )}
         </dl>
 
-        {current.kind !== "purchase" && current.asked < current.floor && (
+        {current.kind !== "purchase" && current.kind !== "order" && current.asked < current.floor && (
           <p className="mt-3 text-xs text-destructive">
             {inr(current.floor - current.asked)} below floor
+          </p>
+        )}
+        {current.kind === "order" && (
+          <p className="mt-3 text-xs text-muted-foreground">
+            Approve so Accounts can raise the invoice. Supervisor allots the driver after that.
           </p>
         )}
         {current.kind === "purchase" && (

@@ -22,7 +22,7 @@ def list_companies(
     db: Session = Depends(get_db),
 ):
     q = db.query(Company).filter(Company.organization_id == auth.organization_id)
-    if auth.role not in (RoleName.SUPER_ADMIN, RoleName.OWNER):
+    if auth.role not in (RoleName.SUPER_ADMIN, RoleName.OWNER, RoleName.SALES):
         allowed = [uc.company_id for uc in auth.user.companies]
         q = q.filter(Company.id.in_(allowed))
     return q.order_by(Company.id).all()
