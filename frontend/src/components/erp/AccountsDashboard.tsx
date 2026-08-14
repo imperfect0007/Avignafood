@@ -2,8 +2,9 @@ import { useEffect, useState } from "react";
 import { Link } from "@tanstack/react-router";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
+import { useCompany } from "@/lib/company-context";
 import { greeting, money } from "@/lib/format";
-import { Badge, Kpi, PageHeader, Panel } from "@/components/erp/ui-bits";
+import { Badge, PageHeader, Panel } from "@/components/erp/ui-bits";
 
 type AccountsDash = {
   today_collections: string;
@@ -17,112 +18,128 @@ type AccountsDash = {
   overdue_invoices: number;
   credit_exposure: string;
   active_customers: number;
+  invoice_count: number;
+  pending_payments: number;
+  credit_alerts: number;
+  today_invoices?: number;
+  today_billing?: string;
+  due_soon?: string;
+  cost_of_delay?: string;
+  aging_current?: string;
+  aging_d1_30?: string;
+  aging_d31_60?: string;
+  aging_d61_90?: string;
+  aging_d90_plus?: string;
+  ready_to_invoice?: number;
 };
 
 export function AccountsDashboard() {
   const [data, setData] = useState<AccountsDash | null>(null);
-  const [ready, setReady] = useState<number | null>(null);
   const [error, setError] = useState("");
+  const { me } = useMe();
+  const { firm } = useCompany();
+  const name = me?.user.full_name?.split(" ")[0] || "Accounts";
 
   useEffect(() => {
     api<AccountsDash>("/api/v1/dashboard/accounts")
       .then(setData)
       .catch((e) => setError(e instanceof Error ? e.message : "Failed to load"));
-    api<unknown[]>("/api/v1/invoices/billable")
-      .then((rows) => setReady(rows.length))
-      .catch(() => setReady(0));
-  }, []);
+  }, [firm]);
 
-  const { me } = useMe();
-  const name = me?.user.full_name?.split(" ")[0] || "Accounts";
+  const kpis = [
+    { label: "Today's invoices", value: String(data?.today_invoices ?? "—"), meta: data ? money(data.today_billing || 0) : "", to: "/invoices" },
+    { label: "Total outstanding", value: data ? money(data.total_receivables) : "—", to: "/receivables" },
+    { label: "Overdue", value: data ? money(data.total_overdue) : "—", tone: data && Number(data.total_overdue) > 0 ? "bad" : "good", to: "/receivables" },
+    { label: "Due soon", value: data ? money(data.due_soon || data.due_this_week) : "—", to: "/receivables" },
+    { label: "Today's collections", value: data ? money(data.today_collections) : "—", to: "/payments" },
+  ] as const;
+
+  const aging = [
+    { label: "Current", value: data?.aging_current },
+    { label: "1–30", value: data?.aging_d1_30 },
+    { label: "31–60", value: data?.aging_d31_60 },
+    { label: "61–90", value: data?.aging_d61_90 },
+    { label: "90+", value: data?.aging_d90_plus },
+  ];
 
   return (
     <>
       <PageHeader
         title={`${greeting()}, ${name}`}
-        subtitle="Billing only — generate invoices, track receivables, open a client’s account. Books live in Tally Prime."
+        subtitle="What is billed, paid, outstanding, due, and overdue. Sales follows up; you book the money."
       />
-
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi
-          label="Ready to invoice"
-          value={ready == null ? "—" : String(ready)}
-          meta="Loads near dispatch"
-          tone={ready ? "warn" : "good"}
-        />
-        <Kpi
-          label="Today's collections"
-          value={data ? money(data.today_collections) : "—"}
-          meta="Payments received today"
-          tone="good"
-        />
-        <Kpi
-          label="Total receivables"
-          value={data ? money(data.total_receivables) : "—"}
-          meta={`${data?.unpaid_invoices ?? 0} unpaid · ${data?.partial_invoices ?? 0} partial`}
-          tone="warn"
-        />
-        <Kpi
-          label="Total overdue"
-          value={data ? money(data.total_overdue) : "—"}
-          meta={`${data?.overdue_invoices ?? 0} invoice(s) past due`}
-          tone={data && Number(data.total_overdue) > 0 ? "bad" : "default"}
-        />
-      </div>
-
-      <div className="mt-4 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Due today" value={data ? money(data.due_today) : "—"} />
-        <Kpi label="Due this week" value={data ? money(data.due_this_week) : "—"} />
-        <Kpi label="Monthly collections" value={data ? money(data.month_collections) : "—"} />
-        <Kpi label="Active clients" value={data ? String(data.active_customers) : "—"} />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        {kpis.map((c) => (
+          <Link key={c.label} to={c.to} className="rounded-2xl border border-border bg-card px-4 py-4 hover:bg-secondary/40">
+            <p className="text-xs text-muted-foreground">{c.label}</p>
+            <p className="mt-1 text-xl font-semibold tabular-nums">{c.value}</p>
+            {"meta" in c && c.meta ? <p className="mt-0.5 text-xs text-muted-foreground">{c.meta}</p> : null}
+          </Link>
+        ))}
       </div>
 
       <div className="mt-6 grid gap-4 lg:grid-cols-2">
-        <Panel title="Quiet alerts">
+        <Panel title="Receivables ageing">
+          <ul className="space-y-2 text-sm">
+            {aging.map((b) => (
+              <li key={b.label} className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
+                <span>{b.label}</span>
+                <span className="tabular-nums font-medium">{data ? money(b.value || 0) : "—"}</span>
+              </li>
+            ))}
+          </ul>
+        </Panel>
+        <Panel title="Work queue">
           <ul className="space-y-3 text-sm">
             <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
               <span>Ready to invoice</span>
-              <Badge tone={ready ? "warn" : "good"}>{ready ?? 0}</Badge>
+              <Badge tone={data?.ready_to_invoice ? "warn" : "good"}>{data?.ready_to_invoice ?? 0}</Badge>
             </li>
             <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
-              <span>Overdue payments</span>
-              <Badge tone={data && data.overdue_invoices > 0 ? "bad" : "good"}>
-                {data?.overdue_invoices ?? 0}
-              </Badge>
+              <span>Pending payments</span>
+              <Badge tone={data && data.pending_payments > 0 ? "warn" : "good"}>{data?.pending_payments ?? 0}</Badge>
             </li>
             <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
-              <span>Unpaid invoices</span>
-              <Badge tone="warn">{data?.unpaid_invoices ?? 0}</Badge>
+              <span>Overdue invoices</span>
+              <Badge tone={data && data.overdue_invoices > 0 ? "bad" : "good"}>{data?.overdue_invoices ?? 0}</Badge>
             </li>
             <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
-              <span>Due today</span>
-              <span className="tabular-nums font-medium">{data ? money(data.due_today) : "—"}</span>
+              <span>Credit limit alerts</span>
+              <Badge tone={data && data.credit_alerts > 0 ? "bad" : "good"}>{data?.credit_alerts ?? 0}</Badge>
+            </li>
+            <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
+              <span>Cost of delay</span>
+              <span className="tabular-nums font-medium">{data ? money(data.cost_of_delay || 0) : "—"}</span>
+            </li>
+            <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
+              <span>Collected this month</span>
+              <span className="tabular-nums font-medium">{data ? money(data.month_collections) : "—"}</span>
             </li>
           </ul>
         </Panel>
-
-        <Panel title="Accounts workflow">
-          <p className="mb-4 text-sm text-muted-foreground">
-            Dispatch info → generate invoice → credit days start → record payments → monitor outstanding. Tally Prime remains the books.
-          </p>
-          <div className="grid gap-2 sm:grid-cols-2">
-            <Link to="/invoices" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
-              Generate invoices →
-            </Link>
-            <Link to="/receivables" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
-              Receivables →
-            </Link>
-            <Link to="/clients" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
-              Client accounts →
-            </Link>
-            <Link to="/analytics" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
-              Billing analytics →
-            </Link>
-          </div>
-        </Panel>
       </div>
+
+      <Panel title="Accounts flow" className="mt-6">
+        <p className="mb-4 text-sm text-muted-foreground">
+          Super Admin approves → you raise invoice → Supervisor allots driver → delivery → payment → receivable closed.
+        </p>
+        <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+          <Link to="/invoices" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
+            Raise invoices →
+          </Link>
+          <Link to="/payments" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
+            Record payments →
+          </Link>
+          <Link to="/receivables" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
+            Open invoice register →
+          </Link>
+          <Link to="/collection" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
+            Collection follow-up →
+          </Link>
+        </div>
+      </Panel>
     </>
   );
 }

@@ -4,6 +4,8 @@ import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
 import { greeting } from "@/lib/format";
 import { Badge, Kpi, PageHeader, Panel } from "@/components/erp/ui-bits";
+import { OutstandingDelivery } from "@/components/erp/OutstandingDelivery";
+import { cn } from "@/lib/utils";
 
 type SupervisorDash = {
   today_sales: string;
@@ -31,6 +33,7 @@ function qty(v: string | number) {
 export function SupervisorDashboard() {
   const [data, setData] = useState<SupervisorDash | null>(null);
   const [error, setError] = useState("");
+  const [tab, setTab] = useState<"overview" | "outstanding">("overview");
   const { me } = useMe();
 
   useEffect(() => {
@@ -45,11 +48,32 @@ export function SupervisorDashboard() {
     <>
       <PageHeader
         title={`${greeting()}, ${name}`}
-        subtitle="Collect confirmed orders → verify stock → procure if short → allocate & book a vehicle window. Accounts invoices after dispatch."
+        subtitle="After Accounts raises the invoice: verify stock → procure if short → allot a driver. After delivery, Accounts collects payment."
       />
+
+      <div className="mb-4 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setTab("overview")}
+          className={cn("rounded-lg px-3 py-2 text-sm", tab === "overview" ? "bg-primary text-primary-foreground" : "border border-border")}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("outstanding")}
+          className={cn("rounded-lg px-3 py-2 text-sm", tab === "outstanding" ? "bg-primary text-primary-foreground" : "border border-border")}
+        >
+          Outstanding delivery
+        </button>
+      </div>
 
       {error && <p className="mb-4 text-sm text-destructive">{error}</p>}
 
+      {tab === "outstanding" ? (
+        <OutstandingDelivery canComplete />
+      ) : (
+        <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi
           label="Pending orders"
@@ -65,7 +89,7 @@ export function SupervisorDashboard() {
         <Kpi
           label="Ready for dispatch"
           value={data ? String(data.ready_for_dispatch) : "—"}
-          meta="Book a window on Order desk"
+          meta="Assign a window on Order desk"
           tone={data && data.ready_for_dispatch > 0 ? "warn" : "default"}
         />
       </div>
@@ -116,7 +140,7 @@ export function SupervisorDashboard() {
 
         <Panel title="Supervisor workflow">
           <p className="mb-4 text-sm text-muted-foreground">
-            After Super Admin approval: verify stock (2nd check) → raise PR if short → receive + batch → allocate, book morning/afternoon/evening for logistics.
+            After Accounts invoices: verify stock (2nd check) → raise PR if short → receive + batch → allot morning/afternoon/evening. Logistics only drives what you assign.
           </p>
           <div className="grid gap-2 sm:grid-cols-2">
             <Link to="/ops" className="rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium hover:bg-primary/10">
@@ -137,6 +161,8 @@ export function SupervisorDashboard() {
           </div>
         </Panel>
       </div>
+        </>
+      )}
     </>
   );
 }

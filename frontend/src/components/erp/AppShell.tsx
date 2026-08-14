@@ -4,50 +4,28 @@ import type { LucideIcon } from "lucide-react";
 import {
   LayoutDashboard, Sparkles, Users, Handshake, MapPin, Boxes, Truck, ShoppingCart,
   ReceiptText, Wallet, BarChart3, Settings, Menu, X, Check, ChevronDown, Bell, ClipboardList,
+  ChevronLeft, Scale, Banknote,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCompany } from "@/lib/company-context";
 import { firms, firmName, quietAlerts, type FirmId } from "@/lib/erp-data";
-import { clearAuth, getToken } from "@/lib/api";
+import { getToken } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
+import { applyBrand } from "@/lib/brand";
+import { nameInitials } from "@/lib/format";
 import { ApprovalPopup, usePendingApprovals } from "@/components/erp/ApprovalPopup";
 import { Badge } from "@/components/erp/ui-bits";
 
 function SidebarBrand({
-  firm,
   logo,
   name,
 }: {
-  firm: FirmId;
   logo?: string | null;
   name: string;
 }) {
-  // Logos vary: square+padding (Apex), tall+black (Avighna), wide marks — tune fit per firm.
-  const fit =
-    firm === "f1"
-      ? "scale-[1.45]"
-      : firm === "f2"
-        ? "scale-100"
-        : firm === "f3"
-          ? "scale-[1.15]"
-          : firm === "f4"
-            ? "scale-[1.25]"
-            : "";
-
   return (
-    <div
-      className={cn(
-        "w-full overflow-hidden rounded-xl border border-sidebar-border",
-        firm === "f2" ? "bg-black" : "bg-card",
-      )}
-    >
-      <div className="flex h-[5.25rem] w-full items-center justify-center sm:h-[5.75rem]">
-        <img
-          src={logo!}
-          alt={name}
-          className={cn("h-full w-full object-contain p-1", fit)}
-        />
-      </div>
+    <div className="flex h-14 w-full items-center justify-center overflow-hidden rounded-xl border border-sidebar-border bg-card p-1.5">
+      <img src={logo!} alt={name} className="h-full w-full object-contain object-center" />
     </div>
   );
 }
@@ -81,6 +59,8 @@ const ownerNav: NavSection[] = [
     items: [
       { to: "/invoices", label: "Invoices", icon: ReceiptText },
       { to: "/receivables", label: "Receivables", icon: Wallet },
+      { to: "/credit", label: "Credit control", icon: Scale },
+      { to: "/reports", label: "Accounts reports", icon: BarChart3 },
       { to: "/analytics", label: "Analytics", icon: BarChart3 },
     ],
   },
@@ -114,23 +94,30 @@ const navByRole: Record<string, NavSection[]> = {
     },
   ],
   sales: [
+    { group: "Field", items: [{ to: "/", label: "Today", icon: LayoutDashboard }] },
     {
-      group: "Field",
+      group: "Sell",
       items: [
-        { to: "/", label: "Today", icon: LayoutDashboard },
         { to: "/field", label: "Visit", icon: MapPin },
+        { to: "/collection", label: "Pending Collection", icon: Wallet },
+        { to: "/leads", label: "Leads", icon: Sparkles },
+        { to: "/customers", label: "Customers", icon: Users },
+        { to: "/sales", label: "Quotes & orders", icon: Handshake },
+        { to: "/inventory", label: "Inventory", icon: Boxes },
+        { to: "/profile", label: "Profile", icon: Users },
       ],
     },
   ],
   accountant: [
-    { group: "Overview", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
+    { group: "Accounts", items: [{ to: "/", label: "Dashboard", icon: LayoutDashboard }] },
     {
-      group: "Billing",
+      group: "Money",
       items: [
         { to: "/invoices", label: "Invoices", icon: ReceiptText },
-        { to: "/receivables", label: "Payments & outstanding", icon: Wallet },
-        { to: "/clients", label: "Client accounts", icon: Users },
-        { to: "/analytics", label: "Analytics", icon: BarChart3 },
+        { to: "/receivables", label: "Receivables", icon: Wallet },
+        { to: "/payments", label: "Payments", icon: Banknote },
+        { to: "/clients", label: "Customers", icon: Users },
+        { to: "/more", label: "More", icon: Menu },
       ],
     },
   ],
@@ -139,7 +126,8 @@ const navByRole: Record<string, NavSection[]> = {
       group: "Drive",
       items: [
         { to: "/", label: "Today", icon: LayoutDashboard },
-        { to: "/dispatch", label: "Runs", icon: Truck },
+        { to: "/runs", label: "Runs", icon: Truck },
+        { to: "/profile", label: "Profile", icon: Users },
       ],
     },
   ],
@@ -149,14 +137,149 @@ function flattenNav(sections: NavSection[]): NavItem[] {
   return sections.flatMap((s) => s.items);
 }
 
+const SALES_TABS: NavItem[] = [
+  { to: "/", label: "Today", icon: LayoutDashboard },
+  { to: "/field", label: "Visit", icon: MapPin },
+  { to: "/inventory", label: "Inventory", icon: Boxes },
+  { to: "/collection", label: "Collection", icon: Wallet },
+  { to: "/sales", label: "Orders", icon: ClipboardList },
+];
+
+const LOGISTICS_TABS: NavItem[] = [
+  { to: "/", label: "Today", icon: LayoutDashboard },
+  { to: "/runs", label: "Runs", icon: Truck },
+];
+
+function SalesPhoneShell({
+  meName,
+  pathname,
+  children,
+}: {
+  meName: string;
+  pathname: string;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    applyBrand("f1");
+  }, []);
+
+  return (
+    <div className="min-h-dvh bg-background">
+      <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold">{meName}</p>
+          <p className="text-xs text-muted-foreground">On-site · phone</p>
+        </div>
+        <Link
+          to="/profile"
+          aria-label="Profile"
+          className={cn(
+            "flex size-11 shrink-0 items-center justify-center rounded-full text-sm font-semibold",
+            pathname === "/profile"
+              ? "bg-primary text-primary-foreground ring-2 ring-primary/40"
+              : "bg-primary text-primary-foreground",
+          )}
+        >
+          {nameInitials(meName) || "S"}
+        </Link>
+      </header>
+      <main className="mx-auto max-w-md px-4 py-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))]">{children}</main>
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-5 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+        {SALES_TABS.map((item) => {
+          const active = pathname === item.to;
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={cn(
+                "flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-center text-[11px] leading-tight",
+                active ? "font-semibold text-primary" : "text-muted-foreground",
+              )}
+            >
+              <item.icon className="size-5" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
+
+function LogisticsPhoneShell({
+  meName,
+  pathname,
+  children,
+}: {
+  meName: string;
+  pathname: string;
+  children: ReactNode;
+}) {
+  useEffect(() => {
+    applyBrand("f1");
+  }, []);
+
+  return (
+    <div className="min-h-dvh bg-background">
+      <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
+        {pathname !== "/" && (
+          <Link
+            to="/"
+            aria-label="Back"
+            className="flex size-11 shrink-0 items-center justify-center rounded-xl border border-border"
+          >
+            <ChevronLeft className="size-5" />
+          </Link>
+        )}
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-base font-semibold">{meName}</p>
+          <p className="text-xs text-muted-foreground">Driver · phone</p>
+        </div>
+        <Link
+          to="/profile"
+          aria-label="Profile"
+          className={cn(
+            "flex size-11 shrink-0 items-center justify-center rounded-full bg-primary text-sm font-semibold text-primary-foreground",
+            pathname === "/profile" && "ring-2 ring-primary/40",
+          )}
+        >
+          {nameInitials(meName) || "L"}
+        </Link>
+      </header>
+      <main className="mx-auto max-w-md px-4 py-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))]">{children}</main>
+      <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-2 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
+        {LOGISTICS_TABS.map((item) => {
+          const active = pathname === item.to;
+          return (
+            <Link
+              key={item.to}
+              to={item.to}
+              className={cn(
+                "flex min-h-16 flex-col items-center justify-center gap-1 px-1 text-center text-[11px] leading-tight",
+                active ? "font-semibold text-primary" : "text-muted-foreground",
+              )}
+            >
+              <item.icon className="size-5" />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+    </div>
+  );
+}
+
+const ACCOUNTANT_MORE = ["/collection", "/credit", "/reports", "/payments"];
+
 function pathAllowed(pathname: string, sections: NavSection[]): boolean {
   const paths = new Set(flattenNav(sections).map((i) => i.to));
   if (paths.has(pathname)) return true;
-  // allow nested/detail under a listed module prefix later
+  if (pathname === "/profile") return true;
+  if (ACCOUNTANT_MORE.includes(pathname) && paths.has("/more")) return true;
   return false;
 }
 
-function CompanySwitcher({ compact }: { compact?: boolean }) {
+function CompanySwitcher({ compact, hideThumb }: { compact?: boolean; hideThumb?: boolean }) {
   const { firm, setFirm } = useCompany();
   const [open, setOpen] = useState(false);
   const options: { id: FirmId; label: string; note: string; logo?: string | null }[] = [
@@ -169,24 +292,25 @@ function CompanySwitcher({ compact }: { compact?: boolean }) {
     })),
   ];
   const active = options.find((o) => o.id === firm);
+  const showThumb = !hideThumb && Boolean(active?.logo);
   return (
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
         className={cn(
-          "flex w-full items-center justify-between gap-2 rounded-xl border border-border bg-card text-left transition-colors hover:bg-secondary",
-          compact ? "px-2 py-1.5" : "px-3 py-2.5",
+          "flex w-full items-center justify-between gap-2 rounded-xl border border-sidebar-border bg-card text-left transition-colors hover:bg-secondary",
+          compact ? "px-2 py-1.5" : "px-3 py-2",
         )}
       >
-        <span className="flex min-w-0 items-center gap-2">
-          {active?.logo ? (
-            <img src={active.logo} alt="" className={cn("rounded-md object-contain bg-background border border-border", compact ? "h-7 w-7" : "h-8 w-8")} />
+        <span className="flex min-w-0 items-center gap-2.5">
+          {showThumb ? (
+            <img src={active!.logo!} alt="" className={cn("shrink-0 rounded-md object-contain bg-background border border-border", compact ? "h-7 w-7" : "h-8 w-8")} />
           ) : null}
           <span className="min-w-0">
             {!compact && (
-              <span className="block text-[0.65rem] uppercase tracking-[0.14em] text-muted-foreground">Company</span>
+              <span className="block text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">Company</span>
             )}
-            <span className={cn("block truncate font-medium", compact ? "max-w-[9rem] text-xs" : "text-sm")}>
+            <span className={cn("block truncate font-medium leading-snug", compact ? "max-w-[9rem] text-xs" : "text-sm")}>
               {compact ? active?.note || firmName(firm) : firmName(firm)}
             </span>
           </span>
@@ -274,125 +398,115 @@ export function AppShell({ children }: { children: ReactNode }) {
     return <div className="min-h-dvh bg-background" />;
   }
 
-  if (role === "sales" || role === "logistics") {
+  if (role === "logistics") {
     return (
-      <div className="min-h-dvh bg-background">
-        <header className="sticky top-0 z-30 flex items-center gap-3 border-b border-border bg-background/95 px-4 py-3 pt-[max(0.75rem,env(safe-area-inset-top))] backdrop-blur">
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-base font-semibold">{me?.user.full_name || (role === "logistics" ? "Driver" : "Sales")}</p>
-            <p className="text-xs text-muted-foreground">{role === "logistics" ? "Driver · phone" : "On-site · phone"}</p>
-          </div>
-          <button
-            type="button"
-            className="rounded-xl border border-border px-3 py-2 text-sm"
-            onClick={() => {
-              clearAuth();
-              navigate({ to: "/login" });
-            }}
-          >
-            Log out
-          </button>
-        </header>
-        <main className="mx-auto max-w-md px-4 py-4 pb-[calc(5.75rem+env(safe-area-inset-bottom))]">
-          {children}
-        </main>
-        <nav className="fixed inset-x-0 bottom-0 z-30 grid grid-cols-2 border-t border-border bg-background/95 pb-[env(safe-area-inset-bottom)] backdrop-blur">
-          {flattenNav(activeNav).map((item) => {
-            const active = pathname === item.to;
-            return (
-              <Link
-                key={item.to}
-                to={item.to}
-                className={cn(
-                  "flex min-h-16 flex-col items-center justify-center gap-1 text-xs",
-                  active ? "font-semibold text-primary" : "text-muted-foreground",
-                )}
-              >
-                <item.icon className="size-6" />
-                {item.label}
-              </Link>
-            );
-          })}
-        </nav>
-      </div>
+      <LogisticsPhoneShell meName={me?.user.full_name || "Logistics"} pathname={pathname}>
+        {children}
+      </LogisticsPhoneShell>
     );
   }
 
+  if (role === "sales") {
+    return (
+      <SalesPhoneShell
+        meName={me?.user.full_name || "Sales Person"}
+        pathname={pathname}
+      >
+        {children}
+      </SalesPhoneShell>
+    );
+  }
+
+  const hasBrandLogo = Boolean(activeFirm?.logo);
+
   const sidebar = (
-    <div className="flex h-full flex-col gap-5 overflow-y-auto bg-sidebar px-3 py-4 transition-colors duration-300 sm:px-4 sm:py-5 sm:gap-6">
-      <div className="flex flex-col gap-2 px-1">
-        {activeFirm?.logo ? (
-          <SidebarBrand firm={activeFirm.id as FirmId} logo={activeFirm.logo} name={activeFirm.short} />
+    <div className="flex h-full min-h-0 flex-col bg-sidebar">
+      <div className="flex shrink-0 flex-col gap-3 px-3 pt-4 pb-3 sm:px-4 sm:pt-5">
+        {hasBrandLogo ? (
+          <SidebarBrand logo={activeFirm!.logo} name={activeFirm!.short} />
         ) : firm === "all" ? (
-          <div className="flex flex-wrap items-center gap-2 rounded-xl border border-sidebar-border bg-card px-3 py-2.5">
+          <div className="flex items-center gap-2 rounded-xl border border-sidebar-border bg-card px-3 py-2">
             {firms.filter((f) => f.logo).map((f) => (
               <img
                 key={f.id}
                 src={f.logo!}
                 alt={f.short}
-                className="h-9 w-9 rounded-md object-contain bg-background"
+                className="h-7 w-7 shrink-0 rounded-md object-contain bg-background"
               />
             ))}
-            <span className="text-sm font-medium">All companies</span>
+            <span className="truncate text-sm font-medium">All companies</span>
           </div>
         ) : (
-          <span className="text-sm font-medium">{activeFirm?.short || "Avighna ERP"}</span>
+          <p className="truncate px-3 text-sm font-medium">{activeFirm?.short || "Avighna ERP"}</p>
         )}
+        <CompanySwitcher hideThumb={hasBrandLogo} />
       </div>
-      <CompanySwitcher />
-      <nav className="flex flex-col gap-4">
-        {activeNav.map((section) => (
-          <div key={section.group}>
-            <p className="px-3 pb-1 text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">{section.group}</p>
-            <ul className="space-y-0.5">
-              {section.items.map((item) => {
-                const active = pathname === item.to;
-                return (
-                  <li key={item.to}>
-                    <Link
-                      to={item.to}
-                      onClick={() => setMobileOpen(false)}
-                      className={cn(
-                        "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm transition-colors active:scale-[0.98]",
-                        active
-                          ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
-                          : "text-sidebar-foreground hover:bg-sidebar-accent/60",
-                      )}
-                    >
-                      <item.icon className="size-4 shrink-0 opacity-70" />
-                      {item.label}
-                    </Link>
-                  </li>
-                );
-              })}
-            </ul>
-          </div>
-        ))}
+
+      <nav className="min-h-0 flex-1 overflow-y-auto px-3 py-1 sm:px-4">
+        <div className="flex flex-col gap-4">
+          {activeNav.map((section) => (
+            <div key={section.group}>
+              <p className="px-3 pb-1 text-[0.65rem] uppercase tracking-[0.16em] text-sidebar-foreground/55">
+                {section.group}
+              </p>
+              <ul className="space-y-0.5">
+                {section.items.map((item) => {
+                  const active = pathname === item.to;
+                  return (
+                    <li key={item.to}>
+                      <Link
+                        to={item.to}
+                        onClick={() => setMobileOpen(false)}
+                        className={cn(
+                          "flex items-center gap-3 rounded-lg px-3 py-2 text-sm leading-snug transition-colors active:scale-[0.98]",
+                          active
+                            ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+                            : "text-sidebar-foreground hover:bg-sidebar-accent/60",
+                        )}
+                      >
+                        <item.icon className="size-4 shrink-0 opacity-70" />
+                        <span className="truncate">{item.label}</span>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            </div>
+          ))}
+        </div>
       </nav>
-      <div className="mt-auto px-3 pb-[env(safe-area-inset-bottom)] text-xs leading-relaxed text-muted-foreground">
-        <span className="capitalize text-foreground">{roleLabel}</span>
-        <button
-          type="button"
-          className="mt-2 block text-sm text-foreground underline"
-          onClick={() => {
-            clearAuth();
-            navigate({ to: "/login" });
-          }}
+
+      <div className="shrink-0 border-t border-sidebar-border px-3 py-3 sm:px-4 pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+        <Link
+          to="/profile"
+          onClick={() => setMobileOpen(false)}
+          className={cn(
+            "flex items-center gap-3 rounded-lg px-3 py-2 text-sm transition-colors",
+            pathname === "/profile"
+              ? "bg-sidebar-accent font-medium text-sidebar-accent-foreground"
+              : "text-sidebar-foreground hover:bg-sidebar-accent/60",
+          )}
         >
-          Log out
-        </button>
+          <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-primary text-xs font-semibold text-primary-foreground">
+            {nameInitials(me?.user.full_name || "") || "A"}
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate font-medium leading-snug text-foreground">{me?.user.full_name || "Profile"}</span>
+            <span className="block truncate text-xs capitalize leading-snug text-muted-foreground">{roleLabel}</span>
+          </span>
+        </Link>
       </div>
     </div>
   );
 
   return (
     <div className="min-h-dvh bg-background">
-      <aside className="fixed inset-y-0 left-0 hidden w-64 border-r border-sidebar-border lg:block">{sidebar}</aside>
+      <aside className="fixed inset-y-0 left-0 hidden w-64 overflow-hidden border-r border-sidebar-border lg:flex lg:flex-col">{sidebar}</aside>
 
       {mobileOpen && (
         <div className="fixed inset-0 z-40 lg:hidden">
           <button className="absolute inset-0 bg-foreground/25" onClick={() => setMobileOpen(false)} aria-label="Close menu" />
-          <div className="absolute inset-y-0 left-0 w-[min(100%,18rem)] border-r border-sidebar-border bg-sidebar shadow-lg">
+          <div className="absolute inset-y-0 left-0 flex w-[min(100%,18rem)] flex-col overflow-hidden border-r border-sidebar-border bg-sidebar shadow-lg">
             {sidebar}
           </div>
         </div>

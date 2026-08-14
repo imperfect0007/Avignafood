@@ -154,7 +154,7 @@ def reject_purchase(
     row.status = "rejected"
     if row.sales_order_id:
         so = db.query(SalesOrder).filter(SalesOrder.id == row.sales_order_id).first()
-        if so and so.status == SalesOrderStatus.CONFIRMED:
+        if so and so.status in (SalesOrderStatus.CONFIRMED, SalesOrderStatus.INVOICED):
             so.ops_status = "shortage"
     write_audit(
         db,
@@ -208,7 +208,7 @@ def receive_purchase(
     row.status = "received"
     if row.sales_order_id:
         so = db.query(SalesOrder).filter(SalesOrder.id == row.sales_order_id).first()
-        if so and so.status == SalesOrderStatus.CONFIRMED:
+        if so and so.status in (SalesOrderStatus.CONFIRMED, SalesOrderStatus.INVOICED):
             so.ops_status = "ready"
     write_audit(
         db,

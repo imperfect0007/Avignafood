@@ -1,8 +1,10 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Link } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { money } from "@/lib/format";
-import { Badge, Bar, Kpi, PageHeader, Panel, Table, Td } from "@/components/erp/ui-bits";
+import { useCompany } from "@/lib/company-context";
+import { PAY_MODES, agingBucket, dueCountdown, payStatus, payStatusLabel } from "@/lib/accounts";
+import { Badge, Kpi, PageHeader, Panel, Table, Td } from "@/components/erp/ui-bits";
 
 export const Route = createFileRoute("/receivables")({
   head: () => ({
@@ -16,6 +18,7 @@ export const Route = createFileRoute("/receivables")({
 
 type InvoiceRow = {
   id: number;
+  customer_id: number;
   number: string;
   customer_name: string | null;
   invoice_date: string;
@@ -24,44 +27,44 @@ type InvoiceRow = {
   total: string | number;
   outstanding: string | number;
   credit_days: number | null;
+  delay_days?: number;
+  interest_loss?: string | number;
+  penalty_waived?: boolean;
 };
 
-type PaymentRow = {
-  id: number;
-  invoice_id: number;
-  invoice_number: string | null;
-  customer_name: string | null;
-  amount: string | number;
-  method: string;
-  reference: string | null;
-  paid_at: string;
+type AgingRow = {
+  customer_id: number;
+  customer_name: string;
+  current: string | number;
+  d1_30: string | number;
+  d31_60: string | number;
+  d61_90: string | number;
+  d90_plus: string | number;
+  total: string | number;
 };
-
-function daysBetween(from: string, to = new Date()) {
-  const a = new Date(from + "T00:00:00");
-  const ms = to.getTime() - a.getTime();
-  return Math.max(0, Math.floor(ms / 86400000));
-}
 
 const inputCls =
   "mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary";
 
 function Receivables() {
+  const { firm } = useCompany();
   const [rows, setRows] = useState<InvoiceRow[]>([]);
-  const [payments, setPayments] = useState<PaymentRow[]>([]);
+  const [aging, setAging] = useState<AgingRow[]>([]);
   const [error, setError] = useState("");
   const [payFor, setPayFor] = useState<InvoiceRow | null>(null);
+  const [alloc, setAlloc] = useState(false);
   const [busy, setBusy] = useState(false);
   const [form, setForm] = useState({ amount: "", method: "bank", reference: "", paid_at: "" });
+  const [allocForm, setAllocForm] = useState({ customer_id: "", amount: "", method: "bank", reference: "", paid_at: "" });
 
   async function load() {
     try {
-      const [inv, pay] = await Promise.all([
+      const [inv, age] = await Promise.all([
         api<InvoiceRow[]>("/api/v1/invoices"),
-        api<PaymentRow[]>("/api/v1/payments"),
+        api<AgingRow[]>("/api/v1/accounts/aging").catch(() => [] as AgingRow[]),
       ]);
       setRows(inv);
-      setPayments(pay);
+      setAging(age);
       setError("");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load receivables");
@@ -70,7 +73,7 @@ function Receivables() {
 
   useEffect(() => {
     void load();
-  }, []);
+  }, [firm]);
 
   const open = useMemo(
     () => rows.filter((i) => i.status === "open" || i.status === "partial"),
@@ -79,15 +82,23 @@ function Receivables() {
   const outstanding = open.reduce((a, i) => a + Number(i.outstanding || 0), 0);
   const overdueRows = open.filter((i) => i.due_date && new Date(i.due_date) < new Date());
   const overdueAmt = overdueRows.reduce((a, i) => a + Number(i.outstanding || 0), 0);
-  const currentAmt = outstanding - overdueAmt;
-  const collected = payments.reduce((a, p) => a + Number(p.amount || 0), 0);
+  const dueSoon = open.filter((i) => {
+    if (!i.due_date) return false;
+    const d = new Date(i.due_date);
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const week = new Date(today);
+    week.setDate(week.getDate() + 7);
+    return d >= today && d <= week;
+  }).reduce((a, i) => a + Number(i.outstanding || 0), 0);
+  const delayCost = open.reduce((a, i) => a + Number(i.interest_loss || 0), 0);
 
   function startPay(i: InvoiceRow) {
     setError("");
     setPayFor(i);
     setForm({
       amount: String(Number(i.outstanding) || ""),
-      method: "bank",
+      method: "neft",
       reference: "",
       paid_at: new Date().toISOString().slice(0, 10),
     });
@@ -123,70 +134,148 @@ function Receivables() {
     }
   }
 
+  const customers = useMemo(() => {
+    const map = new Map<number, string>();
+    for (const i of open) {
+      if (i.customer_id) map.set(i.customer_id, i.customer_name || `Customer ${i.customer_id}`);
+    }
+    return [...map.entries()].map(([id, name]) => ({ id, name }));
+  }, [open]);
+
+  async function saveAllocate(e: React.FormEvent) {
+    e.preventDefault();
+    const amount = Number(allocForm.amount);
+    if (!(amount > 0) || !allocForm.customer_id) {
+      setError("Choose a customer and enter a positive amount");
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      await api("/api/v1/accounts/allocate", {
+        method: "POST",
+        body: JSON.stringify({
+          customer_id: Number(allocForm.customer_id),
+          amount,
+          method: allocForm.method,
+          reference: allocForm.reference.trim() || null,
+          paid_at: allocForm.paid_at || null,
+        }),
+      });
+      setAlloc(false);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not allocate payment");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <>
       <PageHeader
         title="Receivables"
-        subtitle="After an invoice is raised, credit days start. Track payments and watch outstanding here."
+        subtitle="Open invoice register: due date, days to due, days overdue, ageing and cost of delay."
+        action={
+          <Link to="/payments" className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground">
+            Record payment
+          </Link>
+        }
       />
-      {error && !payFor && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      {error && !payFor && !alloc && <p className="mb-3 text-sm text-destructive">{error}</p>}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <Kpi label="Outstanding" value={money(outstanding)} tone="warn" meta="Open + partial invoices" />
-        <Kpi label="Current (in credit)" value={money(currentAmt)} tone="good" />
+        <Kpi label="Total outstanding" value={money(outstanding)} tone="warn" />
         <Kpi label="Overdue" value={money(overdueAmt)} tone={overdueAmt ? "bad" : "good"} meta={`${overdueRows.length} invoice(s)`} />
-        <Kpi label="Payments recorded" value={money(collected)} meta={`${payments.length} receipts`} />
+        <Kpi label="Due soon" value={money(dueSoon)} meta="Next 7 days" />
+        <Kpi label="Cost of delay" value={money(delayCost)} />
       </div>
 
-      <Panel title="Outstanding monitoring" hint="Credit countdown from invoice date" className="mt-6">
-        <Table head={["Invoice", "Customer", "Due", "Amount due", "Terms", "Elapsed", "Countdown", ""]}>
+      <Panel title="Open invoice register" hint="Due countdown is automatic from the customer’s credit days" className="mt-6">
+        <div className="mb-3 flex justify-end">
+          <button
+            type="button"
+            className="rounded-lg border border-border px-3 py-1.5 text-sm"
+            onClick={() => {
+              setError("");
+              setAllocForm({
+                customer_id: customers[0] ? String(customers[0].id) : "",
+                amount: "",
+                method: "neft",
+                reference: "",
+                paid_at: new Date().toISOString().slice(0, 10),
+              });
+              setAlloc(true);
+            }}
+          >
+            Allocate payment
+          </button>
+        </div>
+        <Table head={["Customer", "Invoice", "Due", "Countdown", "Outstanding", "Ageing", "Cost of delay", "Status", ""]}>
           {open.map((i) => {
-            const terms = i.credit_days || 30;
-            const elapsed = daysBetween(i.invoice_date);
-            const overdue = Math.max(0, elapsed - terms);
+            const pay = payStatus(i);
             return (
               <tr key={i.id}>
-                <Td className="font-medium">{i.number}</Td>
                 <Td>{i.customer_name || "—"}</Td>
+                <Td className="font-medium">{i.number}</Td>
                 <Td className="text-muted-foreground">{i.due_date || "—"}</Td>
+                <Td>{dueCountdown(i.due_date)}</Td>
                 <Td className="tabular-nums">{money(i.outstanding)}</Td>
-                <Td className="tabular-nums">{terms} d</Td>
-                <Td className="tabular-nums">{elapsed} d</Td>
+                <Td>{agingBucket(i.due_date)}</Td>
+                <Td className="tabular-nums">{money(i.interest_loss || 0)}</Td>
                 <Td>
-                  <div className="flex items-center gap-2">
-                    <Bar
-                      value={(elapsed / terms) * 100}
-                      tone={overdue ? "destructive" : elapsed / terms > 0.8 ? "warning" : "primary"}
-                    />
-                    {overdue ? <Badge tone="bad">{overdue}d late</Badge> : <Badge tone="good">On time</Badge>}
-                  </div>
+                  <Badge tone={pay === "overdue" ? "bad" : pay === "partial" ? "warn" : "neutral"}>{payStatusLabel(pay)}</Badge>
                 </Td>
                 <Td>
-                  <button type="button" className="text-sm text-primary hover:underline" onClick={() => startPay(i)}>
-                    Record payment
-                  </button>
+                  <div className="flex flex-wrap gap-2">
+                    <button type="button" className="text-sm text-primary hover:underline" onClick={() => startPay(i)}>
+                      Payment
+                    </button>
+                    {Number(i.interest_loss || 0) > 0 && !i.penalty_waived && (
+                      <button
+                        type="button"
+                        className="text-sm text-primary hover:underline"
+                        onClick={() => {
+                          const reason = window.prompt("Waiver reason (required, saved to audit)");
+                          if (!reason || reason.trim().length < 8) {
+                            setError("Waiver needs a reason of at least 8 characters");
+                            return;
+                          }
+                          void api(`/api/v1/accounts/invoices/${i.id}/waive-penalty`, {
+                            method: "POST",
+                            body: JSON.stringify({ reason: reason.trim() }),
+                          })
+                            .then(() => load())
+                            .catch((e) => setError(e instanceof Error ? e.message : "Could not waive"));
+                        }}
+                      >
+                        Waive
+                      </button>
+                    )}
+                  </div>
                 </Td>
               </tr>
             );
           })}
         </Table>
-        {!open.length && <p className="mt-3 text-sm text-muted-foreground">No open outstanding.</p>}
+        {!open.length && <p className="mt-3 text-sm text-muted-foreground">No open outstanding. Receivables are closed.</p>}
       </Panel>
 
-      <Panel title="Payment tracking" hint="Receipts against invoices" className="mt-6">
-        <Table head={["Date", "Invoice", "Customer", "Amount", "Mode", "Reference"]}>
-          {payments.map((p) => (
-            <tr key={p.id}>
-              <Td className="text-muted-foreground">{p.paid_at}</Td>
-              <Td className="font-medium">{p.invoice_number || `#${p.invoice_id}`}</Td>
-              <Td>{p.customer_name || "—"}</Td>
-              <Td className="tabular-nums">{money(p.amount)}</Td>
-              <Td className="capitalize">{p.method}</Td>
-              <Td className="text-muted-foreground">{p.reference || "—"}</Td>
+      <Panel title="Aging" hint="Current · 1–30 · 31–60 · 61–90 · 90+" className="mt-6">
+        <Table head={["Customer", "Current", "1–30", "31–60", "61–90", "90+", "Total"]}>
+          {aging.map((r) => (
+            <tr key={r.customer_id}>
+              <Td className="font-medium">{r.customer_name}</Td>
+              <Td className="tabular-nums">{money(r.current)}</Td>
+              <Td className="tabular-nums">{money(r.d1_30)}</Td>
+              <Td className="tabular-nums">{money(r.d31_60)}</Td>
+              <Td className="tabular-nums">{money(r.d61_90)}</Td>
+              <Td className="tabular-nums">{money(r.d90_plus)}</Td>
+              <Td className="tabular-nums font-medium">{money(r.total)}</Td>
             </tr>
           ))}
         </Table>
-        {!payments.length && <p className="mt-3 text-sm text-muted-foreground">No payments recorded yet.</p>}
+        {!aging.length && <p className="mt-3 text-sm text-muted-foreground">No aging buckets yet.</p>}
       </Panel>
 
       {payFor && (
@@ -216,11 +305,9 @@ function Receivables() {
               <label className="block text-sm text-muted-foreground">
                 Mode
                 <select className={inputCls} value={form.method} onChange={(e) => setForm((f) => ({ ...f, method: e.target.value }))}>
-                  <option value="bank">Bank / NEFT</option>
-                  <option value="upi">UPI</option>
-                  <option value="cheque">Cheque</option>
-                  <option value="cash">Cash</option>
-                  <option value="adjustment">Adjustment</option>
+                  {PAY_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
                 </select>
               </label>
               <label className="block text-sm text-muted-foreground">
@@ -238,6 +325,74 @@ function Receivables() {
                 {busy ? "Saving…" : "Save payment"}
               </button>
               <button type="button" onClick={() => setPayFor(null)} className="rounded-lg border border-border py-2.5 text-sm">
+                Cancel
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {alloc && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+          <button type="button" className="absolute inset-0 bg-foreground/40" aria-label="Close" onClick={() => setAlloc(false)} />
+          <form
+            onSubmit={(e) => void saveAllocate(e)}
+            className="relative z-10 w-full max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-border bg-card p-5 sm:max-w-md sm:rounded-2xl"
+          >
+            <h2 className="text-lg font-semibold">Allocate payment</h2>
+            <p className="mt-1 text-sm text-muted-foreground">FIFO across the customer’s open invoices.</p>
+            <div className="mt-4 space-y-3">
+              <label className="block text-sm text-muted-foreground">
+                Customer
+                <select
+                  required
+                  className={inputCls}
+                  value={allocForm.customer_id}
+                  onChange={(e) => setAllocForm((f) => ({ ...f, customer_id: e.target.value }))}
+                >
+                  <option value="">Select</option>
+                  {customers.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm text-muted-foreground">
+                Amount
+                <input
+                  required
+                  type="number"
+                  min="0.01"
+                  step="0.01"
+                  className={inputCls}
+                  value={allocForm.amount}
+                  onChange={(e) => setAllocForm((f) => ({ ...f, amount: e.target.value }))}
+                />
+              </label>
+              <label className="block text-sm text-muted-foreground">
+                Mode
+                <select className={inputCls} value={allocForm.method} onChange={(e) => setAllocForm((f) => ({ ...f, method: e.target.value }))}>
+                  {PAY_MODES.map((m) => (
+                    <option key={m.value} value={m.value}>{m.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm text-muted-foreground">
+                Reference
+                <input className={inputCls} value={allocForm.reference} onChange={(e) => setAllocForm((f) => ({ ...f, reference: e.target.value }))} placeholder="UTR / cheque no." />
+              </label>
+              <label className="block text-sm text-muted-foreground">
+                Paid on
+                <input type="date" className={inputCls} value={allocForm.paid_at} onChange={(e) => setAllocForm((f) => ({ ...f, paid_at: e.target.value }))} />
+              </label>
+            </div>
+            {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+            <div className="mt-5 grid grid-cols-2 gap-2">
+              <button type="submit" disabled={busy} className="rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-60">
+                {busy ? "Saving…" : "Allocate"}
+              </button>
+              <button type="button" onClick={() => setAlloc(false)} className="rounded-lg border border-border py-2.5 text-sm">
                 Cancel
               </button>
             </div>
