@@ -5,6 +5,7 @@ export type Me = {
     id: number;
     email: string;
     full_name: string;
+    phone?: string | null;
     organization_id: number;
     role: string;
     company_ids: number[];

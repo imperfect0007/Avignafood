@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from app.audit.service import write_audit
+from app.accounts.routes import outstanding as inv_outstanding
 from app.core.database import get_db
 from app.core.deps import AuthContext, require_perms
 from app.core.models import Customer, Invoice, InvoiceStatus, Payment
@@ -74,7 +75,7 @@ def create_payment(
         raise HTTPException(status_code=404, detail="Invoice not found")
     if inv.status == InvoiceStatus.CANCELLED:
         raise HTTPException(status_code=400, detail="Invoice cancelled")
-    outstanding = inv.total - inv.amount_paid
+    outstanding = inv_outstanding(inv)
     if body.amount <= 0:
         raise HTTPException(status_code=400, detail="Amount must be positive")
     if body.amount > outstanding:
@@ -92,9 +93,8 @@ def create_payment(
     )
     db.add(payment)
     inv.amount_paid = inv.amount_paid + body.amount
-    if inv.amount_paid >= inv.total:
+    if inv_outstanding(inv) <= 0:
         inv.status = InvoiceStatus.PAID
-        inv.amount_paid = inv.total
     else:
         inv.status = InvoiceStatus.PARTIAL
 

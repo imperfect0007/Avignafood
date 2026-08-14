@@ -16,6 +16,8 @@ from app.invoices.routes import router as invoices_router
 from app.inventory.routes import router as inventory_router
 from app.leads.routes import router as leads_router
 from app.payments.routes import router as payments_router
+from app.accounts.ensure_schema import ensure_accounts_schema
+from app.accounts.routes import router as accounts_router
 from app.products.routes import router as products_router
 from app.purchases.routes import router as purchases_router
 from app.quotations.routes import router as quotations_router
@@ -29,6 +31,7 @@ import app.core.models  # noqa: F401 — register tables
 app = FastAPI(title="Avighnya Foods API", version="0.1.0")
 # ponytail: create missing tables without a migration tool
 Base.metadata.create_all(bind=engine)
+ensure_accounts_schema(engine)
 
 app.add_middleware(
     CORSMiddleware,
@@ -52,6 +55,7 @@ for r in (
     sales_router,
     invoices_router,
     payments_router,
+    accounts_router,
     dashboard_router,
     audit_router,
     visits_router,
