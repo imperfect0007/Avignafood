@@ -1,67 +1,147 @@
-import { useEffect, useRef, useState } from "react";
-import { Camera } from "lucide-react";
-import { api, apiUpload } from "@/lib/api";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Camera, Truck } from "lucide-react";
+import { api, apiUpload, getCompanyId, mediaUrl } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
-import { greeting } from "@/lib/format";
-import { todayIso, type LiveStatus, type VehicleAvail } from "@/components/erp/VehicleBoard";
-import { readGps } from "@/components/erp/sales-field";
+import { greeting, mapsHref, money, telHref } from "@/lib/format";
+import { firms } from "@/lib/erp-data";
 import { cn } from "@/lib/utils";
+import { todayIso } from "@/components/erp/VehicleBoard";
+import {
+  FAIL_REASONS,
+  WORK_STEPS,
+  activeRun,
+  canDeliver,
+  kg,
+  outcomeCopy,
+  slotLabel,
+  statusLabel,
+  stopCta,
+  truckCopy,
+  truckKey,
+  workPhase,
+  type LogisticsRun,
+  type LogisticsStop,
+  type TruckNow,
+  type TruckStateKey,
+  type WorkPhase,
+} from "@/components/erp/logistics-flow";
 
-export type Stop = {
-  id: number;
-  company_name: string;
-  customer_name: string;
-  address: string | null;
-  phone: string | null;
-  item_summary: string;
-  slot: string;
-  slot_date: string;
-  status: string;
-  pod_url: string | null;
+const STEP_INDEX: Record<WorkPhase, number> = {
+  book: 0,
+  leave: 1,
+  deliver: 2,
+  return: 3,
 };
 
-type InvoicePreview = {
+type InvoicePeek = {
   number: string;
-  company_name: string;
-  customer_name: string;
-  address: string | null;
-  item_summary: string;
-  slot_date: string;
-  slot: string;
+  total: string | number;
+  status: string;
+  customer_name?: string | null;
 };
 
-const LIVE: { id: LiveStatus; label: string; hint: string }[] = [
-  { id: "idle", label: "Idle", hint: "Can take a new drop" },
-  { id: "going", label: "Going", hint: "Out with goods" },
-  { id: "returning", label: "Coming back", hint: "Last drop done" },
-];
+function SignaturePad({ onChange }: { onChange: (file: File | null) => void }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawing = useRef(false);
+
+  function pos(e: React.PointerEvent<HTMLCanvasElement>) {
+    const c = canvasRef.current!;
+    const r = c.getBoundingClientRect();
+    return { x: ((e.clientX - r.left) / r.width) * c.width, y: ((e.clientY - r.top) / r.height) * c.height };
+  }
+
+  function down(e: React.PointerEvent<HTMLCanvasElement>) {
+    drawing.current = true;
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    const p = pos(e);
+    ctx.beginPath();
+    ctx.moveTo(p.x, p.y);
+    e.currentTarget.setPointerCapture(e.pointerId);
+  }
+
+  function move(e: React.PointerEvent<HTMLCanvasElement>) {
+    if (!drawing.current) return;
+    const ctx = canvasRef.current?.getContext("2d");
+    if (!ctx) return;
+    const p = pos(e);
+    ctx.lineTo(p.x, p.y);
+    ctx.strokeStyle = "#1a1a1a";
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = "round";
+    ctx.stroke();
+  }
+
+  function up() {
+    drawing.current = false;
+    const c = canvasRef.current;
+    if (!c) return;
+    c.toBlob((blob) => {
+      if (!blob) return onChange(null);
+      onChange(new File([blob], "signature.png", { type: "image/png" }));
+    });
+  }
+
+  function clear() {
+    const c = canvasRef.current;
+    const ctx = c?.getContext("2d");
+    if (!c || !ctx) return;
+    ctx.clearRect(0, 0, c.width, c.height);
+    onChange(null);
+  }
+
+  return (
+    <div>
+      <canvas
+        ref={canvasRef}
+        width={640}
+        height={220}
+        className="h-28 w-full touch-none rounded-xl border border-border bg-background"
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={up}
+      />
+      <button type="button" className="mt-1 text-xs text-muted-foreground" onClick={clear}>
+        Clear
+      </button>
+    </div>
+  );
+}
 
 export function LogisticsDashboard() {
   const { me } = useMe();
-  const name = me?.user.full_name?.split(" ")[0] || "Ravi";
-  const [truck, setTruck] = useState<VehicleAvail | null>(null);
-  const [today, setToday] = useState<Stop[]>([]);
-  const [upcoming, setUpcoming] = useState<Stop[]>([]);
+  const name = me?.user.full_name?.split(" ")[0] || "Logistics";
+  const [truck, setTruck] = useState<TruckNow | null>(null);
+  const [runs, setRuns] = useState<LogisticsRun[]>([]);
   const [error, setError] = useState("");
-  const [popup, setPopup] = useState<Stop | null>(null);
-  const [openUp, setOpenUp] = useState<number | null>(null);
-  const [invoice, setInvoice] = useState<InvoicePreview | null>(null);
-  const [gone, setGone] = useState<number[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState<{ run: LogisticsRun; stop: LogisticsStop } | null>(null);
+  const [step, setStep] = useState<"detail" | "deliver" | "invoice">("detail");
+  const [outcome, setOutcome] = useState<"delivered" | "partial" | "failed">("delivered");
+  const [qty, setQty] = useState("");
+  const [receiver, setReceiver] = useState("");
+  const [reason, setReason] = useState(FAIL_REASONS[0]);
+  const [remarks, setRemarks] = useState("");
+  const [photo, setPhoto] = useState("");
+  const [sigFile, setSigFile] = useState<File | null>(null);
+  const [ret, setRet] = useState(false);
+  const [invoice, setInvoice] = useState<InvoicePeek | null>(null);
+  const camRef = useRef<HTMLInputElement>(null);
+  const cardCamRef = useRef<HTMLInputElement>(null);
+  const firm = firms.find((f) => String(f.companyId) === getCompanyId());
 
   async function load() {
     try {
-      const [avail, day, later] = await Promise.all([
-        api<VehicleAvail>(`/api/v1/vehicles/availability?on_date=${todayIso()}`),
-        api<Stop[]>(`/api/v1/deliveries?on_date=${todayIso()}`),
-        api<Stop[]>(`/api/v1/deliveries?after=${todayIso()}&status=pending`),
+      const [t, trips] = await Promise.all([
+        api<TruckNow>("/api/v1/logistics/truck"),
+        api<LogisticsRun[]>(`/api/v1/logistics/runs?on_date=${todayIso()}`),
       ]);
-      setTruck(avail);
-      setToday(day);
-      setUpcoming(later);
-      const first = day.find((s) => s.status !== "done");
-      if (first) setPopup(first);
+      setTruck(t);
+      setRuns(trips);
+      setError("");
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not load");
+      setError(e instanceof Error ? e.message : "Could not load today");
     }
   }
 
@@ -69,257 +149,553 @@ export function LogisticsDashboard() {
     void load();
   }, []);
 
-  async function setLive(status: LiveStatus) {
-    if (!truck) return;
+  const live = truckCopy(truck?.status || "idle");
+  const key = truckKey(truck?.status);
+  const run = activeRun(runs, truck?.status || "idle", truck?.run_id);
+  const phase = workPhase(run, truck?.status || "idle");
+  const todayStops = useMemo(() => {
+    if (!run) return [] as { run: LogisticsRun; stop: LogisticsStop }[];
+    return run.stops.map((stop) => ({ run, stop }));
+  }, [run]);
+  const current = todayStops.find((r) => ["pending", "out_for_delivery"].includes(r.stop.status));
+  const nextLabel =
+    phase === "book"
+      ? "Waiting for supervisor"
+      : phase === "leave"
+        ? "Load & go"
+        : phase === "deliver"
+          ? current
+            ? stopCta(current.stop.status, phase)
+            : "Coming back"
+          : "Arrived at base";
+  const nextHint =
+    phase === "book"
+      ? "Supervisor assigns the order on Order desk. Then it appears here."
+      : phase === "leave"
+        ? `${slotLabel(run?.slot)} assigned. Tap Load & go when the truck is loaded.`
+        : phase === "deliver"
+          ? "Deliver each customer in order. Last drop flips the truck to Coming back."
+          : "Drive to base. Tap Arrived at base so Sales sees Idle.";
+
+  async function setLive(status: TruckStateKey) {
+    if (status === key) return;
+    setBusy(true);
+    setError("");
     try {
-      await api(`/api/v1/vehicles/${truck.vehicle_id}/live`, {
-        method: "PUT",
-        body: JSON.stringify({ status }),
-      });
-      setTruck({ ...truck, live_status: status });
+      setTruck(
+        await api<TruckNow>("/api/v1/logistics/truck", {
+          method: "POST",
+          body: JSON.stringify({ status }),
+        }),
+      );
+      await load();
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Could not update");
+      setError(e instanceof Error ? e.message : "Could not update truck");
+    } finally {
+      setBusy(false);
     }
   }
 
-  const visibleToday = today.filter((s) => !gone.includes(s.id));
+  async function doNext() {
+    if (phase === "book") return;
+    if (phase === "leave") return void setLive("going");
+    if (phase === "deliver" && current) {
+      setOpen(current);
+      setOutcome("delivered");
+      setStep("detail");
+      return;
+    }
+    if (phase === "deliver") return void setLive("coming_back");
+    return void setLive("idle");
+  }
 
-  async function onMarked(stop: Stop) {
-    setToday((rows) => rows.map((s) => (s.id === stop.id ? { ...s, status: "done" } : s)));
-    const left = today.filter((s) => s.id !== stop.id && s.status !== "done" && !gone.includes(s.id));
-    if (left.length === 0) await setLive("returning");
+  async function takePhoto(file: File) {
+    setBusy(true);
+    try {
+      const up = await apiUpload("/api/v1/deliveries/upload", file);
+      setPhoto(up.url);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not upload photo");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveDelivery() {
+    if (!open) return;
+    setBusy(true);
+    setError("");
+    try {
+      let signatureUrl: string | null = null;
+      if (sigFile) {
+        const up = await apiUpload("/api/v1/deliveries/upload", sigFile);
+        signatureUrl = up.url;
+      }
+      await api(`/api/v1/logistics/stops/${open.stop.id}/deliver`, {
+        method: "POST",
+        body: JSON.stringify({
+          outcome,
+          qty_delivered: outcome === "partial" ? Number(qty) || 0 : null,
+          receiver_name: receiver.trim() || null,
+          pod_url: photo || null,
+          signature_url: signatureUrl,
+          fail_reason: outcome === "failed" ? reason : null,
+          remarks: remarks.trim() || null,
+          return_required: outcome === "failed" && ret,
+        }),
+      });
+      setOpen(null);
+      setStep("detail");
+      setPhoto("");
+      setSigFile(null);
+      setRemarks("");
+      setReceiver("");
+      setRet(false);
+      await load();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not save delivery");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function showInvoice(stop: LogisticsStop) {
+    if (!stop.invoice_id) {
+      setInvoice(null);
+      setStep("invoice");
+      return;
+    }
+    try {
+      setInvoice(await api<InvoicePeek>(`/api/v1/invoices/${stop.invoice_id}`));
+    } catch {
+      setInvoice({ number: stop.invoice_number || "—", total: 0, status: "pending" });
+    }
+    setStep("invoice");
   }
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-[Fraunces,Georgia,serif] text-3xl leading-tight">{greeting()}, {name}</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Last drop of the day flips you to Coming back. Sales then knows the truck is emptying.
-        </p>
+        <h1 className="text-2xl font-semibold leading-tight">
+          {greeting()}, {name}
+        </h1>
+      </div>
+
+      <div className="rounded-2xl border border-border bg-card px-2 pb-3 pt-3">
+        <div className="relative h-10" aria-hidden>
+          <div className="absolute left-[12.5%] right-[12.5%] top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-secondary" />
+          <div
+            className="absolute left-[12.5%] top-1/2 h-1.5 -translate-y-1/2 rounded-full bg-primary transition-[width] duration-700 ease-out"
+            style={{ width: `${(STEP_INDEX[phase] / 3) * 75}%` }}
+          />
+          <div className="relative grid h-10 grid-cols-4">
+            {WORK_STEPS.map((s, i) => (
+              <span key={s.key} className="flex items-center justify-center">
+                <span
+                  className={cn(
+                    "size-2.5 rounded-full ring-4 ring-card",
+                    i < STEP_INDEX[phase] ? "bg-primary" : "bg-border",
+                    i === STEP_INDEX[phase] && "opacity-0",
+                  )}
+                />
+              </span>
+            ))}
+          </div>
+          <div
+            className="absolute inset-y-0 left-0 flex w-1/4 items-center justify-center transition-transform duration-700 ease-out"
+            style={{ transform: `translate3d(${STEP_INDEX[phase] * 100}%, 0, 0)` }}
+          >
+            <span className="flex size-10 items-center justify-center rounded-full bg-primary text-primary-foreground shadow-sm">
+              <Truck className={cn("size-5", phase === "return" && "-scale-x-100")} strokeWidth={2.25} />
+            </span>
+          </div>
+        </div>
+        <ol className="mt-1 grid grid-cols-4">
+          {WORK_STEPS.map((s) => {
+            const on = s.key === phase;
+            const done =
+              (s.key === "book" && phase !== "book") ||
+              (s.key === "leave" && (phase === "deliver" || phase === "return")) ||
+              (s.key === "deliver" && phase === "return");
+            return (
+              <li
+                key={s.key}
+                className={cn(
+                  "text-center text-xs font-semibold",
+                  (on || done) && "text-foreground",
+                  !on && !done && "text-muted-foreground",
+                )}
+              >
+                {s.title}
+              </li>
+            );
+          })}
+        </ol>
       </div>
 
       {error && <p className="text-sm text-destructive">{error}</p>}
 
-      <div className="grid grid-cols-3 gap-2">
-        {LIVE.map((o) => (
-          <button
-            key={o.id}
-            type="button"
-            onClick={() => void setLive(o.id)}
-            className={cn(
-              "min-h-[4.5rem] rounded-2xl border px-1 py-2 text-center",
-              truck?.live_status === o.id ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-border bg-card",
+      <section
+        className={cn(
+          "rounded-2xl border border-border bg-card px-4 py-4",
+          phase === "deliver" && current && "cursor-pointer",
+        )}
+        onClick={phase === "deliver" && current ? () => void doNext() : undefined}
+      >
+        <p className="text-xs uppercase tracking-wide text-muted-foreground">Truck · {live.title}</p>
+        {(truck?.plate || truck?.driver_name) && (
+          <p className="mt-1 text-sm text-muted-foreground">
+            {truck?.name} · {truck?.plate}
+            {truck?.driver_name ? ` · ${truck.driver_name}` : ""}
+            {run?.number ? ` · ${run.number}` : ""}
+          </p>
+        )}
+        {phase === "deliver" && current ? (
+          <>
+            <p className="mt-3 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+              {current.stop.company_name || firm?.short || "Avighna"}
+            </p>
+            <p className="mt-1 text-lg font-semibold">{current.stop.customer_name}</p>
+            <p className="text-sm">{current.stop.product_summary || kg(current.stop.qty_ordered)}</p>
+            <p className="mt-1 text-sm font-medium">{statusLabel(current.stop.status)}</p>
+            {current.stop.address && (
+              <p className="mt-1 text-sm text-muted-foreground">{current.stop.address}</p>
             )}
-          >
-            <span className="block text-sm font-semibold">{o.label}</span>
-            <span className="mt-1 block text-[10px] leading-tight text-muted-foreground">{o.hint}</span>
-          </button>
-        ))}
-      </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void doNext()}
+              className="mt-3 min-h-12 w-full rounded-2xl bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              {nextLabel}
+            </button>
+          </>
+        ) : phase === "book" ? (
+          <p className="mt-3 rounded-2xl border border-dashed border-border px-3 py-3 text-sm text-muted-foreground">
+            No assignment yet. Supervisor opens Order desk and taps Assign to logistics.
+          </p>
+        ) : (
+          <>
+            <p className="mt-1 text-sm text-muted-foreground">{nextHint}</p>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => void doNext()}
+              className="mt-3 min-h-12 w-full rounded-2xl bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
+            >
+              {nextLabel}
+            </button>
+          </>
+        )}
+      </section>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-medium text-muted-foreground">Today&apos;s drops</h2>
-        {visibleToday.map((s) => (
-          <StopCard
-            key={s.id}
-            stop={s}
-            onMarked={() => void onMarked(s)}
-            onInvoice={(inv) => {
-              setInvoice(inv);
-              setGone((g) => [...g, s.id]);
-            }}
-          />
-        ))}
-        {!visibleToday.length && (
+        <h2 className="text-sm font-medium text-muted-foreground">
+          {phase === "book" ? "No trip yet" : `${slotLabel(run?.slot)} drops`}
+        </h2>
+        <input
+          ref={cardCamRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="hidden"
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            e.target.value = "";
+            if (!f || !open) return;
+            setStep("deliver");
+            setOutcome("delivered");
+            void takePhoto(f);
+          }}
+        />
+        {todayStops.map(({ run: trip, stop }) => {
+          const isCurrent = current?.stop.id === stop.id;
+          const live = canDeliver(stop.status, phase);
+          return (
+            <article
+              key={stop.id}
+              className={cn(
+                "rounded-2xl border bg-card px-3 py-3",
+                isCurrent ? "border-primary" : "border-border",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {stop.company_name || firm?.short || "Avighna"}
+                </p>
+                <span className="text-xs font-medium">{statusLabel(stop.status)}</span>
+              </div>
+              <p className="mt-1 font-medium">{stop.customer_name}</p>
+              <p className="text-sm">{stop.product_summary || kg(stop.qty_ordered)}</p>
+              {stop.address && (
+                <a href={mapsHref(stop.address)} target="_blank" rel="noreferrer" className="mt-1 block text-sm text-muted-foreground">
+                  {stop.address}
+                </a>
+              )}
+              {stop.phone && (
+                <a href={telHref(stop.phone)} className="mt-1 block text-sm font-medium">
+                  {stop.phone}
+                </a>
+              )}
+              <div className="mt-3 flex items-center gap-2">
+                <button
+                  type="button"
+                  className="text-sm font-medium text-primary"
+                  onClick={() => {
+                    setOpen({ run: trip, stop });
+                    void showInvoice(stop);
+                  }}
+                >
+                  {stop.invoice_number || "Invoice"}
+                </button>
+                <span className="flex-1" />
+                <button
+                  type="button"
+                  className={cn(
+                    "min-h-11 rounded-xl px-3 text-sm font-semibold",
+                    live ? "bg-primary text-primary-foreground" : "border border-border",
+                  )}
+                  onClick={() => {
+                    setOpen({ run: trip, stop });
+                    setOutcome("delivered");
+                    setStep(live ? "deliver" : "detail");
+                  }}
+                >
+                  {stopCta(stop.status, phase)}
+                </button>
+                {live && (
+                  <button
+                    type="button"
+                    aria-label="Capture photo"
+                    className="flex size-11 items-center justify-center rounded-xl border border-border"
+                    onClick={() => {
+                      setOpen({ run: trip, stop });
+                      setStep("deliver");
+                      setOutcome("delivered");
+                      setTimeout(() => cardCamRef.current?.click(), 0);
+                    }}
+                  >
+                    <Camera className="size-5" />
+                  </button>
+                )}
+              </div>
+            </article>
+          );
+        })}
+        {!todayStops.length && (
           <p className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-            No drops left today.
+            {phase === "book" ? "Waiting for supervisor to assign an order." : "No drops on this run."}
           </p>
         )}
       </section>
 
-      {upcoming.length > 0 && (
-        <section className="space-y-2">
-          <h2 className="text-sm font-medium text-muted-foreground">Upcoming</h2>
-          {upcoming.map((s) => (
-            <button
-              key={s.id}
-              type="button"
-              onClick={() => setOpenUp((id) => (id === s.id ? null : s.id))}
-              className="w-full rounded-2xl border border-border bg-card px-3 py-2.5 text-left"
-            >
-              <p className="truncate font-medium">{s.customer_name}</p>
-              {openUp === s.id && (
-                <div className="mt-2 space-y-0.5 text-sm text-muted-foreground">
-                  <p>{s.company_name} · {s.item_summary}</p>
-                  <p className="capitalize">{s.slot_date} · {s.slot}</p>
-                  {s.address && <p>{s.address}</p>}
-                  {s.phone && <p>{s.phone}</p>}
+      {open && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-4 sm:items-center">
+          <div className="max-h-[90dvh] w-full max-w-sm overflow-y-auto rounded-2xl border border-border bg-card p-5">
+            {step === "invoice" ? (
+              <>
+                <p className="text-lg font-semibold">{invoice?.number || "Invoice"}</p>
+                <p className="text-sm text-muted-foreground">{open.stop.customer_name}</p>
+                {invoice ? (
+                  <dl className="mt-3 space-y-1 text-sm">
+                    <div className="flex justify-between"><dt>Amount</dt><dd className="tabular-nums">{money(invoice.total)}</dd></div>
+                    <div className="flex justify-between"><dt>Status</dt><dd className="capitalize">{invoice.status}</dd></div>
+                  </dl>
+                ) : (
+                  <p className="mt-3 text-sm text-muted-foreground">Invoice is not on this drop yet. Accounts raises it before the supervisor allots you.</p>
+                )}
+                <button type="button" className="mt-4 min-h-11 w-full rounded-xl border border-border text-sm" onClick={() => setStep("detail")}>
+                  Back
+                </button>
+              </>
+            ) : step === "deliver" ? (
+              <>
+                <p className="text-lg font-semibold">{outcomeCopy(outcome).title}</p>
+                <p className="text-sm text-muted-foreground">{open.stop.customer_name}</p>
+                <p className="mt-1 text-sm text-muted-foreground">{outcomeCopy(outcome).hint}</p>
+                <div className="mt-3 grid grid-cols-3 gap-1">
+                  {(["delivered", "partial", "failed"] as const).map((o) => (
+                    <button
+                      key={o}
+                      type="button"
+                      onClick={() => setOutcome(o)}
+                      className={cn(
+                        "min-h-11 rounded-xl border text-xs font-medium",
+                        outcome === o ? "border-primary bg-primary/10" : "border-border",
+                      )}
+                    >
+                      {o === "delivered" ? "Complete" : o === "partial" ? "Partial" : "Failed"}
+                    </button>
+                  ))}
                 </div>
-              )}
-            </button>
-          ))}
-        </section>
-      )}
-
-      {popup && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-4 sm:items-center">
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">
-              {today.filter((s) => s.status !== "done").length} drop{today.filter((s) => s.status !== "done").length === 1 ? "" : "s"} today
-            </p>
-            <p className="mt-1 text-xl font-semibold">{popup.customer_name}</p>
-            <p className="mt-1 text-sm">{popup.item_summary}</p>
-            <p className="mt-1 text-sm text-muted-foreground capitalize">{popup.slot} · {popup.company_name}</p>
-            <button
-              type="button"
-              className="mt-4 min-h-12 w-full rounded-2xl bg-primary text-sm font-semibold text-primary-foreground"
-              onClick={() => setPopup(null)}
-            >
-              Got it
-            </button>
-          </div>
-        </div>
-      )}
-
-      {invoice && (
-        <div className="fixed inset-0 z-50 flex items-end justify-center bg-foreground/40 p-4 sm:items-center">
-          <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-5">
-            <p className="text-xs uppercase tracking-wide text-muted-foreground">Invoice {invoice.number}</p>
-            <p className="mt-2 text-lg font-semibold">{invoice.customer_name}</p>
-            <p className="text-sm text-muted-foreground">{invoice.company_name}</p>
-            <p className="mt-3 text-sm">{invoice.item_summary}</p>
-            {invoice.address && <p className="mt-1 text-sm text-muted-foreground">{invoice.address}</p>}
-            <p className="mt-2 text-xs capitalize text-muted-foreground">{invoice.slot_date} · {invoice.slot}</p>
-            <button
-              type="button"
-              className="mt-4 min-h-12 w-full rounded-2xl bg-primary text-sm font-semibold text-primary-foreground"
-              onClick={() => setInvoice(null)}
-            >
-              Close
-            </button>
+                {outcome === "partial" && (
+                  <label className="mt-3 block text-sm">
+                    Qty delivered
+                    <input
+                      type="number"
+                      inputMode="decimal"
+                      className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2"
+                      value={qty}
+                      onChange={(e) => setQty(e.target.value)}
+                      placeholder={`Of ${open.stop.qty_ordered}`}
+                    />
+                  </label>
+                )}
+                {outcome === "failed" && (
+                  <>
+                    <label className="mt-3 block text-sm">
+                      Reason
+                      <select
+                        className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2"
+                        value={reason}
+                        onChange={(e) => setReason(e.target.value)}
+                      >
+                        {FAIL_REASONS.map((r) => (
+                          <option key={r}>{r}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="mt-2 flex items-center gap-2 text-sm">
+                      <input type="checkbox" checked={ret} onChange={(e) => setRet(e.target.checked)} />
+                      Return goods to warehouse
+                    </label>
+                  </>
+                )}
+                {outcome !== "failed" && (
+                  <>
+                    <label className="mt-3 block text-sm">
+                      Received by
+                      <input
+                        className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2"
+                        value={receiver}
+                        onChange={(e) => setReceiver(e.target.value)}
+                      />
+                    </label>
+                    <p className="mt-3 text-sm">Signature</p>
+                    <SignaturePad onChange={setSigFile} />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      capture="environment"
+                      className="hidden"
+                      ref={camRef}
+                      onChange={(e) => {
+                        const f = e.target.files?.[0];
+                        e.target.value = "";
+                        if (f) void takePhoto(f);
+                      }}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => camRef.current?.click()}
+                      className={cn(
+                        "mt-2 flex min-h-11 w-full items-center justify-center gap-2 rounded-xl border text-sm",
+                        photo ? "border-primary bg-primary/10" : "border-border",
+                      )}
+                    >
+                      <Camera className="size-4" />
+                      {photo ? "Photo attached" : "Take photo"}
+                    </button>
+                    {photo && <img src={mediaUrl(photo)} alt="" className="mt-2 max-h-32 w-full rounded-xl object-cover" />}
+                  </>
+                )}
+                <label className="mt-3 block text-sm">
+                  Remarks
+                  <input
+                    className="mt-1 w-full rounded-xl border border-border bg-background px-3 py-2"
+                    value={remarks}
+                    onChange={(e) => setRemarks(e.target.value)}
+                  />
+                </label>
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  <button type="button" className="min-h-11 rounded-xl border border-border text-sm" onClick={() => setStep("detail")}>
+                    Back
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => void saveDelivery()}
+                    className="min-h-11 rounded-xl bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
+                  >
+                    {outcomeCopy(outcome).save}
+                  </button>
+                </div>
+              </>
+            ) : (
+              <>
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  {open.stop.company_name || firm?.short}
+                </p>
+                <p className="text-lg font-semibold">{open.stop.customer_name}</p>
+                <p className="text-sm">{open.stop.product_summary || kg(open.stop.qty_ordered)}</p>
+                <p className="mt-1 text-sm font-medium">{statusLabel(open.stop.status)}</p>
+                {open.stop.status === "delivered" && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {open.stop.receiver_name ? `Received by ${open.stop.receiver_name}` : "Fully delivered"}
+                    {open.stop.qty_delivered ? ` · ${kg(open.stop.qty_delivered)}` : ""}
+                  </p>
+                )}
+                {open.stop.status === "partial" && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {kg(open.stop.qty_delivered)} of {kg(open.stop.qty_ordered)}
+                    {open.stop.remarks ? ` · ${open.stop.remarks}` : ""}
+                  </p>
+                )}
+                {open.stop.status === "failed" && (
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    {open.stop.fail_reason || "Failed"}
+                    {open.stop.remarks ? ` · ${open.stop.remarks}` : ""}
+                  </p>
+                )}
+                {open.stop.address && (
+                  <a href={mapsHref(open.stop.address)} target="_blank" rel="noreferrer" className="mt-2 block text-sm text-primary">
+                    {open.stop.address}
+                  </a>
+                )}
+                <div className="mt-4 grid grid-cols-2 gap-2">
+                  {open.stop.phone && (
+                    <a href={telHref(open.stop.phone)} className="min-h-11 rounded-xl border border-border text-center text-sm leading-[2.75rem]">
+                      Call
+                    </a>
+                  )}
+                  {open.stop.address && (
+                    <a
+                      href={mapsHref(open.stop.address)}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="min-h-11 rounded-xl border border-border text-center text-sm leading-[2.75rem]"
+                    >
+                      Navigate
+                    </a>
+                  )}
+                  <button
+                    type="button"
+                    className="min-h-11 rounded-xl border border-border text-sm"
+                    onClick={() => void showInvoice(open.stop)}
+                  >
+                    Invoice
+                  </button>
+                  {canDeliver(open.stop.status, phase) && (
+                    <button
+                      type="button"
+                      className="min-h-11 rounded-xl bg-primary text-sm font-semibold text-primary-foreground"
+                      onClick={() => {
+                        setOutcome("delivered");
+                        setStep("deliver");
+                      }}
+                    >
+                      {stopCta(open.stop.status, phase)}
+                    </button>
+                  )}
+                </div>
+                <button type="button" className="mt-3 min-h-11 w-full rounded-xl border border-border text-sm" onClick={() => setOpen(null)}>
+                  Close
+                </button>
+              </>
+            )}
           </div>
         </div>
       )}
     </div>
-  );
-}
-
-function StopCard({
-  stop,
-  onMarked,
-  onInvoice,
-}: {
-  stop: Stop;
-  onMarked: () => void;
-  onInvoice: (inv: InvoicePreview) => void;
-}) {
-  const inputRef = useRef<HTMLInputElement>(null);
-  const [busy, setBusy] = useState(false);
-  const [done, setDone] = useState(stop.status === "done");
-  const [shot, setShot] = useState(!!stop.pod_url);
-  const [podUrl, setPodUrl] = useState(stop.pod_url);
-  const [err, setErr] = useState("");
-
-  async function takePhoto(file: File) {
-    setBusy(true);
-    setErr("");
-    try {
-      const up = await apiUpload("/api/v1/deliveries/upload", file);
-      setPodUrl(up.url);
-      try {
-        await readGps();
-      } catch {
-        /* photo is enough */
-      }
-      setShot(true);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not save photo");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function markDelivered() {
-    setBusy(true);
-    setErr("");
-    try {
-      await api(`/api/v1/deliveries/${stop.id}/complete`, {
-        method: "POST",
-        body: JSON.stringify({ pod_url: podUrl, lat: null, lng: null }),
-      });
-      setDone(true);
-      onMarked();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Could not mark delivered");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function openInvoice() {
-    if (!done) {
-      setErr("Mark delivered first");
-      return;
-    }
-    try {
-      const inv = await api<InvoicePreview>(`/api/v1/deliveries/${stop.id}/invoice`);
-      onInvoice(inv);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "No invoice yet");
-    }
-  }
-
-  return (
-    <article className="relative rounded-2xl border border-border bg-card p-4 pr-14">
-      <input
-        ref={inputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        className="hidden"
-        onChange={(e) => {
-          const f = e.target.files?.[0];
-          e.target.value = "";
-          if (f) void takePhoto(f);
-        }}
-      />
-      <button
-        type="button"
-        aria-label="Take proof photo"
-        onClick={() => inputRef.current?.click()}
-        className="absolute right-3 top-3 grid size-10 place-items-center rounded-xl border border-border bg-background"
-      >
-        <Camera className={cn("size-5", shot && "text-primary")} />
-      </button>
-
-      <p className="text-xs uppercase tracking-wide text-muted-foreground">{stop.company_name}</p>
-      <h3 className="mt-0.5 text-lg font-semibold">{stop.customer_name}</h3>
-      <p className="mt-1 text-sm">{stop.item_summary}</p>
-      {stop.address && <p className="mt-2 text-sm text-muted-foreground">{stop.address}</p>}
-      {stop.phone && (
-        <a href={`tel:${stop.phone}`} className="mt-1 inline-block text-sm font-medium text-primary">
-          {stop.phone}
-        </a>
-      )}
-      <p className="mt-1 text-xs capitalize text-muted-foreground">{stop.slot}</p>
-
-      <div className="mt-3 flex items-center justify-between gap-3">
-        <button type="button" onClick={() => void openInvoice()} className="text-sm text-primary underline">
-          Invoice
-        </button>
-        {!done && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void markDelivered()}
-            className="min-h-12 flex-1 rounded-2xl bg-primary text-sm font-semibold text-primary-foreground disabled:opacity-60"
-          >
-            {busy ? "Saving…" : "Mark delivered"}
-          </button>
-        )}
-      </div>
-      {err && <p className="mt-2 text-sm text-destructive">{err}</p>}
-    </article>
   );
 }

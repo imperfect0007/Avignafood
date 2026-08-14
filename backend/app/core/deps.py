@@ -87,7 +87,7 @@ def get_auth(
         company = db.query(Company).filter(Company.id == company_id).first()
         if not company or company.organization_id != user.organization_id:
             raise HTTPException(status_code=403, detail="No access to this company")
-        if user.role.name not in (RoleName.SUPER_ADMIN, RoleName.OWNER):
+        if user.role.name not in (RoleName.SUPER_ADMIN, RoleName.OWNER, RoleName.SALES):
             allowed = {uc.company_id for uc in user.companies}
             if company_id not in allowed:
                 raise HTTPException(status_code=403, detail="No access to this company")

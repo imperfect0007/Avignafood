@@ -17,6 +17,8 @@ import { AccountsDashboard } from "@/components/erp/AccountsDashboard";
 import { SupervisorDashboard } from "@/components/erp/SupervisorDashboard";
 import { SalesDashboard } from "@/components/erp/SalesDashboard";
 import { LogisticsDashboard } from "@/components/erp/LogisticsDashboard";
+import { OutstandingDelivery } from "@/components/erp/OutstandingDelivery";
+import { cn } from "@/lib/utils";
 import {
   DashboardCustomizer,
   useDashboardLayout,
@@ -152,6 +154,7 @@ function OwnerDashboard() {
   const { firm } = useCompany();
   const { layout, ready, toggle, remove, setSize, move, reset } = useDashboardLayout();
   const [customizeOpen, setCustomizeOpen] = useState(false);
+  const [tab, setTab] = useState<"overview" | "outstanding">("overview");
   const [kpiGrain, setKpiGrain] = useState<KpiGrain>(() => {
     try {
       const g = localStorage.getItem("avighna.dashboard.kpiGrain") as KpiGrain | null;
@@ -405,6 +408,7 @@ function OwnerDashboard() {
         title="Good morning, Owner"
         subtitle={`${firmName(firm)} · ${PERIOD_LABEL[period]}. Customize widgets anytime.`}
         action={
+          tab === "overview" ? (
           <DashboardCustomizer
             layout={layout}
             onToggle={toggle}
@@ -417,9 +421,31 @@ function OwnerDashboard() {
             kpiGrain={kpiGrain}
             onKpiGrainChange={changeKpiGrain}
           />
+          ) : undefined
         }
       />
 
+      <div className="mb-4 flex gap-2">
+        <button
+          type="button"
+          onClick={() => setTab("overview")}
+          className={cn("rounded-lg px-3 py-2 text-sm", tab === "overview" ? "bg-primary text-primary-foreground" : "border border-border")}
+        >
+          Overview
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("outstanding")}
+          className={cn("rounded-lg px-3 py-2 text-sm", tab === "outstanding" ? "bg-primary text-primary-foreground" : "border border-border")}
+        >
+          Outstanding delivery
+        </button>
+      </div>
+
+      {tab === "outstanding" ? (
+        <OutstandingDelivery canComplete />
+      ) : (
+        <>
       {ready && (
         <div className="grid grid-cols-12 gap-3 sm:gap-4 lg:gap-5">
           {layout.map((item) => (
@@ -441,6 +467,8 @@ function OwnerDashboard() {
         <p className="mt-8 text-center text-sm text-muted-foreground">
           No widgets selected — open Customize to add some.
         </p>
+      )}
+        </>
       )}
     </>
   );
