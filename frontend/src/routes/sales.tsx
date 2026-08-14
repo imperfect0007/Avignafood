@@ -1,9 +1,12 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company-context";
+import { useMe } from "@/lib/me-context";
 import { approvals, byFirm, inr } from "@/lib/erp-data";
 import { Badge, Kpi, PageHeader, Panel, Table, Td } from "@/components/erp/ui-bits";
 import { ApprovalPopup, usePendingApprovals } from "@/components/erp/ApprovalPopup";
+import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/sales")({
   head: () => ({
@@ -19,7 +22,164 @@ export const Route = createFileRoute("/sales")({
 
 type ApprovalRow = (typeof approvals)[number];
 
+type Order = {
+  id: number;
+  customer_id: number;
+  customer_name: string | null;
+  status: string;
+  ops_status: string;
+  quotation_id: number | null;
+  lines: { product_id: number; quantity: number; unit_price: number; outstanding_qty?: number }[];
+  stock_warnings: string[];
+  created_at?: string | null;
+  confirmed_at?: string | null;
+  logistics_status?: string | null;
+  vehicle?: string | null;
+  eta?: string | null;
+};
+
+type ProductOpt = { id: number; name: string; unit: string; base_price: string | number };
+
+function orderStage(o: Order) {
+  if (o.status === "cancelled") return "Declined";
+  if (o.status === "draft" || o.ops_status === "pending_approval") return "Waiting Super Admin";
+  if (o.status === "confirmed" || o.ops_status === "awaiting_invoice") return "Waiting invoice";
+  if (o.ops_status === "pending_verify") return "With supervisor";
+  if (o.ops_status === "ready") return "Ready to allot";
+  if (o.ops_status === "allocated") return "Driver allotted";
+  if (o.ops_status === "dispatched") return o.logistics_status === "delivered" ? "Delivered" : "With driver";
+  if (o.status === "invoiced") return "Invoiced";
+  return o.status;
+}
+
+function isOverdue(o: Order) {
+  if (o.lines.some((ln) => Number(ln.outstanding_qty) > 0)) return true;
+  if (o.ops_status === "shortage" || o.ops_status === "procuring") return true;
+  return false;
+}
+
 function Sales() {
+  const { me } = useMe();
+  if (me?.user.role === "sales") return <SalesWorkspace />;
+  return <OwnerApprovals />;
+}
+
+function SalesWorkspace() {
+  const [orders, setOrders] = useState<Order[]>([]);
+  const [products, setProducts] = useState<ProductOpt[]>([]);
+  const [error, setError] = useState("");
+  const [tab, setTab] = useState<"normal" | "overdue">("normal");
+
+  async function load() {
+    const [o, p] = await Promise.all([
+      api<Order[]>("/api/v1/sales-orders").catch(() => [] as Order[]),
+      api<ProductOpt[]>("/api/v1/products").catch(() => [] as ProductOpt[]),
+    ]);
+    setOrders(o);
+    setProducts(p);
+  }
+
+  useEffect(() => {
+    void load();
+    sessionStorage.removeItem("avighna.quoteCustomer");
+  }, []);
+
+  async function confirmOrder(id: number) {
+    setError("");
+    try {
+      await api(`/api/v1/sales-orders/${id}/confirm`, { method: "POST" });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not send order");
+    }
+  }
+
+  const overdue = orders.filter(isOverdue);
+  const normal = orders.filter((o) => !isOverdue(o));
+  const shown = tab === "overdue" ? overdue : normal;
+
+  return (
+    <>
+      <PageHeader title="Orders" subtitle="Create an order and it goes to Super Admin. After they approve, Accounts raises the invoice, then Supervisor allots the driver." />
+      <div className="mb-4 grid grid-cols-2 gap-2">
+        <button
+          type="button"
+          onClick={() => setTab("normal")}
+          className={cn(
+            "rounded-2xl border px-3 py-3 text-left",
+            tab === "normal" ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-border bg-card",
+          )}
+        >
+          <p className="text-xs text-muted-foreground">Normal</p>
+          <p className="mt-1 text-lg font-semibold tabular-nums">{normal.length}</p>
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("overdue")}
+          className={cn(
+            "rounded-2xl border px-3 py-3 text-left",
+            tab === "overdue" ? "border-primary bg-primary/10 ring-2 ring-primary" : "border-border bg-card",
+          )}
+        >
+          <p className="text-xs text-muted-foreground">Overdue</p>
+          <p className="mt-1 text-lg font-semibold tabular-nums">{overdue.length}</p>
+        </button>
+      </div>
+      {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
+      <ul className="space-y-2">
+        {shown.map((o) => (
+          <li key={o.id} className="rounded-2xl border border-border bg-card px-3 py-3">
+            <div className="flex items-start justify-between gap-2">
+              <span>
+                <span className="block font-medium">SO-{o.id}</span>
+                <span className="text-sm text-muted-foreground">{o.customer_name || `Customer ${o.customer_id}`}</span>
+              </span>
+              <Badge tone={isOverdue(o) ? "warn" : o.status === "cancelled" ? "bad" : "neutral"}>
+                {isOverdue(o) ? "Overdue" : orderStage(o)}
+              </Badge>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">Warehouse: {o.ops_status.replaceAll("_", " ")}</p>
+            {o.logistics_status && (
+              <p className="mt-1 text-xs text-muted-foreground">
+                Dispatch: {o.logistics_status.replaceAll("_", " ")}
+                {o.vehicle ? ` · ${o.vehicle}` : ""}
+                {o.eta ? ` · expected ${o.eta}` : ""}
+              </p>
+            )}
+            {o.lines.some((ln) => Number(ln.outstanding_qty) > 0) && (
+              <p className="mt-2 text-sm font-medium text-warning">
+                Outstanding delivery:{" "}
+                {o.lines
+                  .filter((ln) => Number(ln.outstanding_qty) > 0)
+                  .map((ln) => {
+                    const p = products.find((x) => x.id === ln.product_id);
+                    return `${Number(ln.outstanding_qty).toLocaleString("en-IN")} ${p?.unit || "KG"} ${p?.name || ""}`.trim();
+                  })
+                  .join(" · ")}
+              </p>
+            )}
+            {o.status === "draft" && o.ops_status !== "pending_approval" && (
+              <button
+                type="button"
+                onClick={() => void confirmOrder(o.id)}
+                className="mt-2 rounded-xl border border-border px-3 py-1.5 text-xs"
+              >
+                Send to Super Admin
+              </button>
+            )}
+          </li>
+        ))}
+        {!shown.length && (
+          <li className="py-8 text-center text-sm text-muted-foreground">
+            {tab === "overdue" ? "No overdue orders." : "No normal orders yet."}
+          </li>
+        )}
+      </ul>
+    </>
+  );
+}
+
+function OwnerApprovals() {
   const { firm } = useCompany();
   const rows = byFirm(approvals, firm);
   const [decisions, setDecisions] = useState<Record<string, string>>({});

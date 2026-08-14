@@ -6,10 +6,12 @@ from sqlalchemy.orm import Session, joinedload
 
 from app.audit.service import write_audit
 from app.core.database import get_db
-from app.core.deps import AuthContext, require_perms
+from app.core.deps import AuthContext, require_owner, require_perms
 from app.core.models import (
     Customer,
     Dispatch,
+    Invoice,
+    InvoiceStatus,
     Product,
     Purchase,
     Quotation,
@@ -25,12 +27,13 @@ from app.core.models import (
 from app.core.schemas import (
     AllocateDispatchIn,
     OrderDeskOut,
+    OutstandingDeliveryOut,
     RaisePurchaseIn,
     SalesOrderCreate,
     SalesOrderOut,
 )
 from app.inventory.routes import _default_warehouse
-from app.sales.ops import desk_out, line_stock, on_hand
+from app.sales.ops import desk_out, line_stock, on_hand, outstanding_rows, qty_short
 
 router = APIRouter(prefix="/sales-orders", tags=["sales"])
 
@@ -44,7 +47,31 @@ def _stock_qty(db: Session, warehouse_id: int, product_id: int) -> Decimal:
     return row.quantity if row else Decimal("0")
 
 
-def _out(so: SalesOrder, warnings: list[str] | None = None, customer_name: str | None = None) -> SalesOrderOut:
+def _logistics_for(db: Session, so_id: int) -> tuple[str | None, str | None, str | None]:
+    from app.core.models import LogisticsRun, LogisticsStop, Vehicle
+
+    stop = (
+        db.query(LogisticsStop)
+        .filter(LogisticsStop.sales_order_id == so_id)
+        .order_by(LogisticsStop.id.desc())
+        .first()
+    )
+    if not stop:
+        return None, None, None
+    run = db.query(LogisticsRun).filter(LogisticsRun.id == stop.run_id).first()
+    plate = None
+    if run and run.vehicle_id:
+        veh = db.query(Vehicle).filter(Vehicle.id == run.vehicle_id).first()
+        plate = veh.plate if veh else None
+    status = stop.status if stop.status != "pending" else (run.status if run else None)
+    eta = str(run.on_date) if run else None
+    return status, plate, eta
+
+
+def _out(so: SalesOrder, warnings: list[str] | None = None, customer_name: str | None = None, db: Session | None = None) -> SalesOrderOut:
+    logistics_status = vehicle = eta = None
+    if db is not None:
+        logistics_status, vehicle, eta = _logistics_for(db, so.id)
     return SalesOrderOut(
         id=so.id,
         company_id=so.company_id,
@@ -59,12 +86,18 @@ def _out(so: SalesOrder, warnings: list[str] | None = None, customer_name: str |
                 "product_id": ln.product_id,
                 "quantity": float(ln.quantity),
                 "unit_price": float(ln.unit_price),
+                "outstanding_qty": float(getattr(ln, "outstanding_qty", 0) or 0),
             }
             for ln in so.lines
         ],
         stock_warnings=warnings or [],
-        ops_status=getattr(so, "ops_status", None) or "pending_verify",
+        ops_status=getattr(so, "ops_status", None) or "pending_approval",
         customer_name=customer_name,
+        created_at=so.created_at,
+        confirmed_at=so.confirmed_at,
+        logistics_status=logistics_status,
+        vehicle=vehicle,
+        eta=eta,
     )
 
 
@@ -81,7 +114,20 @@ def list_orders(
         .order_by(SalesOrder.id.desc())
         .all()
     )
-    return [_out(r) for r in rows]
+    names = {
+        c.id: c.name
+        for c in db.query(Customer).filter(Customer.id.in_({r.customer_id for r in rows} or {0})).all()
+    }
+    return [_out(r, customer_name=names.get(r.customer_id), db=db) for r in rows]
+
+
+@router.get("/outstanding", response_model=list[OutstandingDeliveryOut])
+def list_outstanding_delivery(
+    auth: AuthContext = Depends(require_perms("sales.view")),
+    db: Session = Depends(get_db),
+):
+    company_id = auth.require_company()
+    return outstanding_rows(db, company_id=company_id, org_id=auth.organization_id)
 
 
 @router.post("", response_model=SalesOrderOut)
@@ -129,6 +175,7 @@ def create_order(
         notes=body.notes,
         created_by_id=auth.user.id,
         status=SalesOrderStatus.DRAFT,
+        ops_status="pending_approval",
     )
     db.add(so)
     db.flush()
@@ -140,12 +187,14 @@ def create_order(
         )
         if not product:
             raise HTTPException(status_code=400, detail=f"Product {line.product_id} not found")
+        outstanding = qty_short(line.quantity, on_hand(db, warehouse_id, line.product_id))
         db.add(
             SalesOrderLine(
                 sales_order_id=so.id,
                 product_id=line.product_id,
                 quantity=line.quantity,
                 unit_price=line.unit_price,
+                outstanding_qty=outstanding,
             )
         )
     if quotation:
@@ -161,7 +210,33 @@ def create_order(
     )
     db.commit()
     so = db.query(SalesOrder).options(joinedload(SalesOrder.lines)).filter(SalesOrder.id == so.id).first()
-    return _out(so)
+    return _out(so, db=db)
+
+
+def _credit_hold(db: Session, company_id: int, so: SalesOrder) -> None:
+    customer = db.query(Customer).filter(Customer.id == so.customer_id).first()
+    if not customer:
+        return
+    open_invs = (
+        db.query(Invoice)
+        .filter(
+            Invoice.customer_id == customer.id,
+            Invoice.company_id == company_id,
+            Invoice.status.in_([InvoiceStatus.OPEN, InvoiceStatus.PARTIAL]),
+        )
+        .all()
+    )
+    outstanding = sum((i.total - i.amount_paid for i in open_invs), Decimal("0"))
+    overdue = any(i.due_date and i.due_date < datetime.now(timezone.utc).date() for i in open_invs)
+    order_value = sum((ln.quantity * ln.unit_price for ln in so.lines), Decimal("0"))
+    limit = customer.credit_limit or Decimal("0")
+    if overdue:
+        raise HTTPException(status_code=400, detail="Credit hold — customer has overdue invoices")
+    if limit > 0 and (outstanding + order_value) > limit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Credit limit exceeded — outstanding {outstanding} + order {order_value} > limit {limit}",
+        )
 
 
 @router.post("/{order_id}/confirm", response_model=SalesOrderOut)
@@ -170,35 +245,15 @@ def confirm_order(
     auth: AuthContext = Depends(require_perms("sales.edit")),
     db: Session = Depends(get_db),
 ):
+    """Sales submits a draft to Super Admin. Does not confirm — Owner/Super Admin must approve."""
     company_id = auth.require_company()
-    so = (
-        db.query(SalesOrder)
-        .options(joinedload(SalesOrder.lines))
-        .filter(
-            SalesOrder.id == order_id,
-            SalesOrder.company_id == company_id,
-            SalesOrder.organization_id == auth.organization_id,
-        )
-        .first()
-    )
-    if not so:
-        raise HTTPException(status_code=404, detail="Sales order not found")
+    so = _load_so(db, company_id, auth.organization_id, order_id)
     if so.status != SalesOrderStatus.DRAFT:
-        raise HTTPException(status_code=400, detail="Only draft orders can be confirmed")
-
-    # First stock check (sale time) — warn only; Supervisor does the second verify.
-    warnings: list[str] = []
-    for ln in so.lines:
-        available = _stock_qty(db, so.warehouse_id, ln.product_id)
-        if available < ln.quantity:
-            warnings.append(f"product {ln.product_id}: need {ln.quantity}, have {available}")
-
-    so.status = SalesOrderStatus.CONFIRMED
-    so.confirmed_at = datetime.now(timezone.utc)
-    so.ops_status = "pending_verify"
+        raise HTTPException(status_code=400, detail="Only draft orders can be sent for approval")
+    so.ops_status = "pending_approval"
     write_audit(
         db,
-        action="confirm",
+        action="submit_approval",
         entity_type="sales_order",
         entity_id=so.id,
         organization_id=auth.organization_id,
@@ -207,7 +262,62 @@ def confirm_order(
     )
     db.commit()
     so = db.query(SalesOrder).options(joinedload(SalesOrder.lines)).filter(SalesOrder.id == so.id).first()
-    return _out(so, warnings)
+    return _out(so, db=db)
+
+
+@router.post("/{order_id}/approve", response_model=SalesOrderOut)
+def approve_order(
+    order_id: int,
+    auth: AuthContext = Depends(require_owner()),
+    db: Session = Depends(get_db),
+):
+    """Super Admin / Owner approves the order. It then goes to Accounts to raise the invoice."""
+    company_id = auth.require_company()
+    so = _load_so(db, company_id, auth.organization_id, order_id)
+    if so.status != SalesOrderStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Only draft orders can be approved")
+    _credit_hold(db, company_id, so)
+    so.status = SalesOrderStatus.CONFIRMED
+    so.confirmed_at = datetime.now(timezone.utc)
+    so.ops_status = "awaiting_invoice"
+    write_audit(
+        db,
+        action="approve",
+        entity_type="sales_order",
+        entity_id=so.id,
+        organization_id=auth.organization_id,
+        company_id=company_id,
+        user_id=auth.user.id,
+    )
+    db.commit()
+    so = db.query(SalesOrder).options(joinedload(SalesOrder.lines)).filter(SalesOrder.id == so.id).first()
+    return _out(so, db=db)
+
+
+@router.post("/{order_id}/reject", response_model=SalesOrderOut)
+def reject_order(
+    order_id: int,
+    auth: AuthContext = Depends(require_owner()),
+    db: Session = Depends(get_db),
+):
+    company_id = auth.require_company()
+    so = _load_so(db, company_id, auth.organization_id, order_id)
+    if so.status != SalesOrderStatus.DRAFT:
+        raise HTTPException(status_code=400, detail="Only draft orders can be declined")
+    so.status = SalesOrderStatus.CANCELLED
+    so.ops_status = "rejected"
+    write_audit(
+        db,
+        action="reject",
+        entity_type="sales_order",
+        entity_id=so.id,
+        organization_id=auth.organization_id,
+        company_id=company_id,
+        user_id=auth.user.id,
+    )
+    db.commit()
+    so = db.query(SalesOrder).options(joinedload(SalesOrder.lines)).filter(SalesOrder.id == so.id).first()
+    return _out(so, db=db)
 
 
 def _load_so(db: Session, company_id: int, org_id: int, order_id: int) -> SalesOrder:
@@ -231,7 +341,7 @@ def order_desk(
     auth: AuthContext = Depends(require_perms("sales.view")),
     db: Session = Depends(get_db),
 ):
-    """Supervisor queue: confirmed orders after Super Admin approval."""
+    """Supervisor queue: invoiced orders after Accounts raises the bill. Super Admin approval is already done."""
     company_id = auth.require_company()
     rows = (
         db.query(SalesOrder)
@@ -239,7 +349,7 @@ def order_desk(
         .filter(
             SalesOrder.company_id == company_id,
             SalesOrder.organization_id == auth.organization_id,
-            SalesOrder.status == SalesOrderStatus.CONFIRMED,
+            SalesOrder.status == SalesOrderStatus.INVOICED,
         )
         .order_by(SalesOrder.id.desc())
         .all()
@@ -253,13 +363,16 @@ def verify_stock(
     auth: AuthContext = Depends(require_perms("sales.edit")),
     db: Session = Depends(get_db),
 ):
-    """Second stock check — Supervisor verifies availability after approval."""
+    """Second stock check — Supervisor confirms after Accounts has raised the invoice."""
     company_id = auth.require_company()
     so = _load_so(db, company_id, auth.organization_id, order_id)
-    if so.status != SalesOrderStatus.CONFIRMED:
-        raise HTTPException(status_code=400, detail="Only confirmed orders can be verified")
+    if so.status != SalesOrderStatus.INVOICED:
+        raise HTTPException(status_code=400, detail="Accounts must raise the invoice before supervisor confirm")
     lines = line_stock(db, so.warehouse_id, so.lines)
     so.ops_status = "ready" if all(ln.ok for ln in lines) else "shortage"
+    if so.ops_status == "ready":
+        for ln in so.lines:
+            ln.outstanding_qty = Decimal("0")
     write_audit(
         db,
         action="verify_stock",
@@ -269,6 +382,43 @@ def verify_stock(
         company_id=company_id,
         user_id=auth.user.id,
         detail=so.ops_status,
+    )
+    db.commit()
+    return desk_out(db, so)
+
+
+@router.post("/{order_id}/fulfill-outstanding", response_model=OrderDeskOut)
+def fulfill_outstanding(
+    order_id: int,
+    auth: AuthContext = Depends(require_perms("sales.edit")),
+    db: Session = Depends(get_db),
+):
+    """After new stock arrives, clear remaining delivery on this order."""
+    company_id = auth.require_company()
+    so = _load_so(db, company_id, auth.organization_id, order_id)
+    for ln in so.lines:
+        need = ln.outstanding_qty or Decimal("0")
+        if need <= 0:
+            continue
+        have = _stock_qty(db, so.warehouse_id, ln.product_id)
+        if have < need:
+            product = db.query(Product).filter(Product.id == ln.product_id).first()
+            name = product.name if product else f"Product {ln.product_id}"
+            raise HTTPException(
+                status_code=400,
+                detail=f"Still short on {name}: need {need} more, have {have}",
+            )
+        ln.outstanding_qty = Decimal("0")
+    if all((ln.outstanding_qty or Decimal("0")) <= 0 for ln in so.lines):
+        so.ops_status = "ready"
+    write_audit(
+        db,
+        action="fulfill_outstanding",
+        entity_type="sales_order",
+        entity_id=so.id,
+        organization_id=auth.organization_id,
+        company_id=company_id,
+        user_id=auth.user.id,
     )
     db.commit()
     return desk_out(db, so)
@@ -332,19 +482,17 @@ def allocate_dispatch(
     auth: AuthContext = Depends(require_perms("dispatch.create")),
     db: Session = Depends(get_db),
 ):
-    """Allocate stock, book vehicle slot, prepare dispatch for Accounts + logistics."""
+    """Supervisor assigns a READY order to a logistics window. Stock leaves when the truck goes."""
+    from app.logistics.routes import assign_order_to_window
+
     company_id = auth.require_company()
     so = _load_so(db, company_id, auth.organization_id, order_id)
-    if so.status != SalesOrderStatus.CONFIRMED:
-        raise HTTPException(status_code=400, detail="Order must be confirmed")
-    if (so.ops_status or "") not in ("ready", "allocated"):
-        raise HTTPException(status_code=400, detail="Verify stock (and receive purchase if short) before dispatch")
+    if so.status != SalesOrderStatus.INVOICED:
+        raise HTTPException(status_code=400, detail="Accounts must raise the invoice before assigning a driver")
+    if (so.ops_status or "") != "ready":
+        raise HTTPException(status_code=400, detail="Verify stock (and receive purchase if short) before assigning")
     if body.slot not in ("morning", "afternoon", "evening"):
         raise HTTPException(status_code=400, detail="Slot must be morning, afternoon or evening")
-
-    existing = db.query(Dispatch).filter(Dispatch.sales_order_id == so.id).first()
-    if existing:
-        raise HTTPException(status_code=400, detail="Dispatch already prepared for this order")
 
     lines = line_stock(db, so.warehouse_id, so.lines)
     if not all(ln.ok for ln in lines):
@@ -369,58 +517,16 @@ def allocate_dispatch(
     if not veh:
         raise HTTPException(status_code=400, detail="No vehicle in fleet")
 
-    slot_row = (
-        db.query(VehicleSlot)
-        .filter(VehicleSlot.vehicle_id == veh.id, VehicleSlot.on_date == body.on_date, VehicleSlot.slot == body.slot)
-        .first()
-    )
-    if slot_row and slot_row.status == "booked":
-        raise HTTPException(status_code=400, detail="That vehicle slot is already booked")
-    if slot_row:
-        slot_row.status = "booked"
-        slot_row.notes = f"SO-{so.id}"
-    else:
-        db.add(
-            VehicleSlot(
-                vehicle_id=veh.id,
-                on_date=body.on_date,
-                slot=body.slot,
-                status="booked",
-                notes=f"SO-{so.id}",
-            )
-        )
-
-    names = ", ".join(ln.product_name for ln in lines)
-    qty = sum((ln.quantity for ln in lines), Decimal("0"))
-    load = Dispatch(
-        organization_id=auth.organization_id,
+    run = assign_order_to_window(
+        db,
+        org_id=auth.organization_id,
         company_id=company_id,
-        customer_id=so.customer_id,
-        product=names or "Order",
-        quantity=qty,
-        vehicle=veh.plate,
-        transporter=veh.driver_name,
-        status="Ready",
-        notes=f"SO-{so.id} · {body.slot} {body.on_date}",
-        created_by_id=auth.user.id,
-        sales_order_id=so.id,
-        slot_date=body.on_date,
+        so=so,
+        on_date=body.on_date,
         slot=body.slot,
-        eta=f"{body.on_date} {body.slot}",
+        veh=veh,
+        user_id=auth.user.id,
     )
-    db.add(load)
-    db.flush()
-
-    for ln in so.lines:
-        row = (
-            db.query(StockBalance)
-            .filter(StockBalance.warehouse_id == so.warehouse_id, StockBalance.product_id == ln.product_id)
-            .first()
-        )
-        if row:
-            row.quantity = (row.quantity or Decimal("0")) - ln.quantity
-
-    so.ops_status = "allocated"
     write_audit(
         db,
         action="allocate",
@@ -429,7 +535,7 @@ def allocate_dispatch(
         organization_id=auth.organization_id,
         company_id=company_id,
         user_id=auth.user.id,
-        detail=f"dispatch={load.id} slot={body.slot} date={body.on_date}",
+        detail=f"run={run.number} slot={body.slot} date={body.on_date}",
     )
     db.commit()
     return desk_out(db, so)

@@ -247,6 +247,10 @@ def set_stock(
         db.add(row)
     db.flush()
     delta = body.quantity - (prev or Decimal("0"))
+    if delta > 0:
+        from app.sales.ops import apply_inbound_to_outstanding
+
+        apply_inbound_to_outstanding(db, company_id=company_id, product_id=body.product_id, qty=delta)
     _record_movement(db, auth=auth, company_id=company_id, row=row, kind="set", quantity=delta)
     write_audit(
         db,
@@ -302,6 +306,9 @@ def stock_inbound(
         )
         db.add(row)
     db.flush()
+    from app.sales.ops import apply_inbound_to_outstanding
+
+    apply_inbound_to_outstanding(db, company_id=company_id, product_id=body.product_id, qty=body.quantity)
     _record_movement(
         db,
         auth=auth,

@@ -1,17 +1,17 @@
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
-import { api } from "@/lib/api";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
+import { API_URL, api, getCompanyId, getToken } from "@/lib/api";
 import { useCompany } from "@/lib/company-context";
 import { useMe } from "@/lib/me-context";
-import { byFirm, firms, inr, leads as mockLeads } from "@/lib/erp-data";
-import { Badge, PageHeader } from "@/components/erp/ui-bits";
+import { inr } from "@/lib/erp-data";
+import { Badge, Kpi, PageHeader } from "@/components/erp/ui-bits";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/leads")({
   head: () => ({
     meta: [
       { title: "Leads · Avighna ERP" },
-      { name: "description", content: "Organization-wide lead pipeline across companies." },
+      { name: "description", content: "Lead pipeline for the active company." },
       { property: "og:title", content: "Leads · Avighna ERP" },
     ],
   }),
@@ -20,6 +20,7 @@ export const Route = createFileRoute("/leads")({
 
 type LeadRow = {
   id: string;
+  rawId: number;
   name: string;
   contact: string;
   phone: string;
@@ -29,7 +30,13 @@ type LeadRow = {
   value: number;
   stage: string;
   assigned: string;
-  company: string;
+  gstin: string;
+  priority: string;
+  nextFollow: string;
+  overdue: boolean;
+  customerId: number | null;
+  notes: string;
+  location: string;
 };
 
 type ApiLead = {
@@ -44,8 +51,17 @@ type ApiLead = {
   estimated_value: string | number | null;
   status: string;
   assigned_to_id: number | null;
-  company_id: number;
+  assigned_to_name: string | null;
+  gstin: string | null;
+  priority: string | null;
+  next_follow_up: string | null;
+  overdue_follow_up: boolean;
+  customer_id: number | null;
+  notes: string | null;
+  location: string | null;
 };
+
+type Activity = { id: number; kind: string; notes: string | null; created_at: string };
 
 const PIPELINE = ["new", "contacted", "qualified", "visit_required", "quotation", "negotiation", "won", "lost"] as const;
 
@@ -60,23 +76,18 @@ const STAGE_LABEL: Record<string, string> = {
   lost: "Lost",
 };
 
-const MOCK_STAGE: Record<string, string> = {
-  New: "new",
-  Contacted: "contacted",
-  Meeting: "visit_required",
-  "Follow-up": "qualified",
-  Negotiation: "negotiation",
-  Won: "won",
-  Lost: "lost",
-};
-
-const MOCK_VALUE: Record<string, number> = {
-  "LD-1041": 540000,
-  "LD-1040": 320000,
-  "LD-1039": 680000,
-  "LD-1038": 150000,
-  "LD-1037": 40000,
-  "LD-1036": 900000,
+const emptyForm = {
+  business_name: "",
+  contact_person: "",
+  phone: "",
+  source: "WhatsApp",
+  lead_type: "wholesale",
+  product_requirement: "",
+  estimated_value: "",
+  gstin: "",
+  location: "",
+  priority: "medium",
+  notes: "",
 };
 
 function stageTone(stage: string): "good" | "bad" | "warn" | "neutral" {
@@ -86,25 +97,10 @@ function stageTone(stage: string): "good" | "bad" | "warn" | "neutral" {
   return "neutral";
 }
 
-function mockAsRows(firm: Parameters<typeof byFirm>[1]): LeadRow[] {
-  return byFirm(mockLeads, firm).map((l) => ({
-    id: l.id,
-    name: l.company,
-    contact: l.contact,
-    phone: "—",
-    source: l.source,
-    type: l.type,
-    requirement: l.requirement,
-    value: MOCK_VALUE[l.id] || 0,
-    stage: MOCK_STAGE[l.stage] || "new",
-    assigned: l.stage === "New" ? "Unassigned" : "Sales",
-    company: firms.find((f) => f.id === l.firm)?.short || l.firm,
-  }));
-}
-
 function apiAsRows(rows: ApiLead[]): LeadRow[] {
   return rows.map((l) => ({
     id: `LD-${l.id}`,
+    rawId: l.id,
     name: l.business_name,
     contact: l.contact_person || "—",
     phone: l.phone || "—",
@@ -113,58 +109,73 @@ function apiAsRows(rows: ApiLead[]): LeadRow[] {
     requirement: [l.product_requirement, l.quantity].filter(Boolean).join(" · ") || "—",
     value: Number(l.estimated_value) || 0,
     stage: l.status,
-    assigned: l.assigned_to_id ? `#${l.assigned_to_id}` : "Unassigned",
-    company: firms.find((f) => f.companyId === l.company_id)?.short || `Co ${l.company_id}`,
+    assigned: l.assigned_to_name || (l.assigned_to_id ? `#${l.assigned_to_id}` : "Unassigned"),
+    gstin: l.gstin || "",
+    priority: l.priority || "medium",
+    nextFollow: l.next_follow_up ? new Date(l.next_follow_up).toLocaleDateString("en-IN") : "—",
+    overdue: !!l.overdue_follow_up,
+    customerId: l.customer_id,
+    notes: l.notes || "",
+    location: l.location || "",
   }));
 }
 
 const inputCls =
   "rounded-lg border border-border bg-background px-3 py-2 text-sm outline-none focus:border-primary";
 
-function SalesGoesToVisit() {
-  const navigate = useNavigate();
-  useEffect(() => {
-    navigate({ to: "/field" });
-  }, [navigate]);
-  return null;
-}
-
 function Leads() {
-  const { me } = useMe();
-  if (me?.user.role === "sales") return <SalesGoesToVisit />;
   return <LeadsDesk />;
 }
 
 function LeadsDesk() {
+  const { me } = useMe();
+  const isSales = me?.user.role === "sales";
   const { firm } = useCompany();
+  const importRef = useRef<HTMLInputElement>(null);
   const [rows, setRows] = useState<LeadRow[]>([]);
   const [q, setQ] = useState("");
   const [stage, setStage] = useState("all");
   const [source, setSource] = useState("all");
+  const [leadType, setLeadType] = useState("all");
+  const [assigned, setAssigned] = useState("all");
+  const [dateFrom, setDateFrom] = useState("");
+  const [dateTo, setDateTo] = useState("");
   const [adding, setAdding] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({
-    business_name: "",
-    contact_person: "",
-    phone: "",
-    source: "WhatsApp",
-    lead_type: "wholesale",
-    product_requirement: "",
-    estimated_value: "",
-  });
+  const [selected, setSelected] = useState<LeadRow | null>(null);
+  const [followNote, setFollowNote] = useState("");
+  const [followDate, setFollowDate] = useState("");
+  const [activities, setActivities] = useState<Activity[]>([]);
+  const [busy, setBusy] = useState(false);
+  const [form, setForm] = useState(emptyForm);
 
   async function load() {
     try {
-      const data = await api<ApiLead[]>("/api/v1/leads");
-      setRows(data.length ? apiAsRows(data) : mockAsRows(firm));
+      const params = new URLSearchParams();
+      if (assigned !== "all") params.set("assigned", assigned);
+      if (dateFrom) params.set("date_from", dateFrom);
+      if (dateTo) params.set("date_to", dateTo);
+      const qs = params.toString();
+      const data = await api<ApiLead[]>(`/api/v1/leads${qs ? `?${qs}` : ""}`);
+      setRows(apiAsRows(data));
     } catch {
-      setRows(mockAsRows(firm));
+      setRows([]);
     }
   }
 
   useEffect(() => {
-    load();
-  }, [firm]);
+    void load();
+  }, [firm, assigned, dateFrom, dateTo]);
+
+  useEffect(() => {
+    if (!selected?.rawId) {
+      setActivities([]);
+      return;
+    }
+    api<Activity[]>(`/api/v1/leads/${selected.rawId}/activities`)
+      .then(setActivities)
+      .catch(() => setActivities([]));
+  }, [selected?.rawId]);
 
   const sources = useMemo(
     () => Array.from(new Set(rows.map((r) => r.source).filter((s) => s && s !== "—"))),
@@ -174,11 +185,11 @@ function LeadsDesk() {
   const filtered = rows.filter((r) => {
     if (stage !== "all" && r.stage !== stage) return false;
     if (source !== "all" && r.source !== source) return false;
+    if (leadType !== "all" && r.type !== leadType) return false;
     if (!q.trim()) return true;
-    return `${r.id} ${r.name} ${r.contact} ${r.phone} ${r.requirement}`.toLowerCase().includes(q.trim().toLowerCase());
+    return `${r.id} ${r.name} ${r.contact} ${r.phone} ${r.requirement} ${r.gstin}`.toLowerCase().includes(q.trim().toLowerCase());
   });
 
-  // ponytail: one pass for stage tallies instead of re-filtering per stage
   const stageCounts = useMemo(() => {
     const bag = new Map<string, { n: number; value: number }>();
     for (const r of rows) {
@@ -196,9 +207,6 @@ function LeadsDesk() {
   const total = rows.length;
   const nAt = (k: string) => stageCounts.find((s) => s.key === k)?.n ?? 0;
   const pipelineValue = rows.filter((r) => r.stage !== "won" && r.stage !== "lost").reduce((s, r) => s + r.value, 0);
-  const unassigned = rows.filter((r) => r.assigned === "Unassigned").length;
-  const wonN = nAt("won");
-  const winRate = total ? Math.round((wonN / total) * 100) : 0;
 
   async function createLead(e: FormEvent) {
     e.preventDefault();
@@ -214,21 +222,103 @@ function LeadsDesk() {
           lead_type: form.lead_type || null,
           product_requirement: form.product_requirement || null,
           estimated_value: form.estimated_value ? Number(form.estimated_value) : null,
+          gstin: form.gstin || null,
+          location: form.location || null,
+          priority: form.priority || null,
+          notes: form.notes || null,
         }),
       });
       setAdding(false);
-      setForm({
-        business_name: "",
-        contact_person: "",
-        phone: "",
-        source: "WhatsApp",
-        lead_type: "wholesale",
-        product_requirement: "",
-        estimated_value: "",
-      });
+      setForm(emptyForm);
       await load();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not create lead");
+    }
+  }
+
+  async function patchLead(id: number, body: Record<string, unknown>) {
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/v1/leads/${id}`, { method: "PATCH", body: JSON.stringify(body) });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not update lead");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function convertSelected() {
+    if (!selected?.rawId) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/v1/leads/${selected.rawId}/convert`, { method: "POST" });
+      setSelected(null);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not convert lead");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function saveFollowUp(kind = "follow_up") {
+    if (!selected?.rawId) return;
+    setBusy(true);
+    setError("");
+    try {
+      await api(`/api/v1/leads/${selected.rawId}/follow-ups`, {
+        method: "POST",
+        body: JSON.stringify({
+          kind,
+          notes: followNote || (kind === "call" ? "Call logged" : null),
+          next_follow_up: followDate ? new Date(followDate).toISOString() : null,
+        }),
+      });
+      setFollowNote("");
+      setFollowDate("");
+      const acts = await api<Activity[]>(`/api/v1/leads/${selected.rawId}/activities`);
+      setActivities(acts);
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not save activity");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function exportCsv() {
+    setError("");
+    try {
+      const headers: Record<string, string> = {};
+      const token = getToken();
+      const companyId = getCompanyId();
+      if (token) headers.Authorization = `Bearer ${token}`;
+      if (companyId) headers["X-Company-Id"] = companyId;
+      const res = await fetch(`${API_URL}/api/v1/leads/export`, { headers });
+      if (!res.ok) throw new Error("Export failed");
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "leads.csv";
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not export");
+    }
+  }
+
+  async function importCsv(file: File) {
+    setError("");
+    try {
+      const csv = await file.text();
+      await api("/api/v1/leads/import", { method: "POST", body: JSON.stringify({ csv }) });
+      await load();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Could not import");
     }
   }
 
@@ -240,27 +330,60 @@ function LeadsDesk() {
     <div className="mx-auto max-w-6xl space-y-4">
       <PageHeader
         title="Leads"
-        subtitle={`${total} total · ${pipelineValue ? inr(pipelineValue) + " in pipeline" : "pipeline empty"} · ${winRate}% won`}
         action={
-          <button
-            type="button"
-            onClick={() => setAdding(true)}
-            className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
-          >
-            + Add lead
-          </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={() => void exportCsv()} className="rounded-lg border border-border px-3 py-2 text-sm">
+              Export CSV
+            </button>
+            <button type="button" onClick={() => importRef.current?.click()} className="rounded-lg border border-border px-3 py-2 text-sm">
+              Import CSV
+            </button>
+            <input
+              ref={importRef}
+              type="file"
+              accept=".csv,text/csv"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = "";
+                if (file) void importCsv(file);
+              }}
+            />
+            <button
+              type="button"
+              onClick={() => setAdding(true)}
+              className="rounded-lg bg-primary px-3 py-2 text-sm font-medium text-primary-foreground"
+            >
+              + Add lead
+            </button>
+          </div>
         }
       />
 
+      {!isSales && (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+        <Kpi label="Total" value={String(total)} />
+        <Kpi label="New" value={String(nAt("new"))} />
+        <Kpi label="Qualified" value={String(nAt("qualified"))} />
+        <Kpi label="Converted" value={String(nAt("won"))} />
+        <Kpi label="Lost" value={String(nAt("lost"))} />
+        <Kpi label="Pipeline value" value={pipelineValue ? inr(pipelineValue) : "—"} />
+      </div>
+      )}
+
       <section className="overflow-hidden rounded-xl border border-border bg-card shadow-[var(--shadow-soft)]">
-        {/* toolbar */}
         <div className="flex flex-wrap items-center gap-2 border-b border-border p-3 sm:p-4">
           <input
             value={q}
             onChange={(e) => setQ(e.target.value)}
-            placeholder="Search leads…"
+            placeholder="Search"
             className={cn(inputCls, "min-w-[12rem] flex-1")}
           />
+          <select value={assigned} onChange={(e) => setAssigned(e.target.value)} className={inputCls}>
+            <option value="all">All salesperson</option>
+            <option value="me">Me</option>
+            <option value="unassigned">Unassigned</option>
+          </select>
           <select value={source} onChange={(e) => setSource(e.target.value)} className={inputCls}>
             <option value="all">All sources</option>
             {sources.map((s) => (
@@ -269,13 +392,32 @@ function LeadsDesk() {
               </option>
             ))}
           </select>
-          {(stage !== "all" || source !== "all" || q) && (
+          <select value={leadType} onChange={(e) => setLeadType(e.target.value)} className={inputCls}>
+            <option value="all">All types</option>
+            <option value="wholesale">Wholesale</option>
+            <option value="retail">Retail</option>
+          </select>
+          <select value={stage} onChange={(e) => setStage(e.target.value)} className={inputCls}>
+            <option value="all">All stages</option>
+            {PIPELINE.map((s) => (
+              <option key={s} value={s}>
+                {STAGE_LABEL[s]}
+              </option>
+            ))}
+          </select>
+          <input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} className={inputCls} />
+          <input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} className={inputCls} />
+          {(stage !== "all" || source !== "all" || leadType !== "all" || assigned !== "all" || dateFrom || dateTo || q) && (
             <button
               type="button"
               className="rounded-lg border border-border px-2.5 py-2 text-sm text-muted-foreground hover:bg-secondary"
               onClick={() => {
                 setStage("all");
                 setSource("all");
+                setLeadType("all");
+                setAssigned("all");
+                setDateFrom("");
+                setDateTo("");
                 setQ("");
               }}
             >
@@ -287,7 +429,6 @@ function LeadsDesk() {
           </span>
         </div>
 
-        {/* stage tabs — full-width, larger */}
         <div className="grid w-full grid-cols-3 border-b border-border sm:grid-cols-5 lg:grid-cols-9">
           <button
             type="button"
@@ -312,8 +453,6 @@ function LeadsDesk() {
                 stage === s.key
                   ? "border-primary bg-primary-soft/30 text-foreground"
                   : "border-transparent text-muted-foreground hover:bg-secondary/50 hover:text-foreground",
-                s.key === "won" && s.n > 0 && stage !== s.key && "text-success",
-                s.key === "lost" && s.n > 0 && stage !== s.key && "text-destructive",
               )}
             >
               <span className="text-[0.65rem] font-medium uppercase tracking-[0.08em] sm:text-xs">{s.label}</span>
@@ -322,35 +461,15 @@ function LeadsDesk() {
           ))}
         </div>
 
-        {/* distribution bar */}
-        {total > 0 && (
-          <div className="flex h-1.5 w-full overflow-hidden bg-muted">
-            {stageCounts.map((s) =>
-              s.n ? (
-                <div
-                  key={s.key}
-                  title={`${s.label}: ${s.n}`}
-                  className={cn(
-                    s.key === "won" ? "bg-success" : s.key === "lost" ? "bg-destructive/70" : "bg-primary",
-                    s.key === "new" && "bg-primary/40",
-                    s.key === "negotiation" && "bg-warning",
-                  )}
-                  style={{ width: `${(s.n / total) * 100}%` }}
-                />
-              ) : null,
-            )}
-          </div>
-        )}
-
-        {unassigned > 0 && (
-          <p className="border-b border-border bg-primary-soft/30 px-3 py-2 text-xs text-foreground sm:px-4">
-            {unassigned} unassigned — open a lead to assign.
+        {rows.some((r) => r.overdue) && (
+          <p className="border-b border-border bg-accent/40 px-3 py-2 text-xs sm:px-4">
+            {rows.filter((r) => r.overdue).length} overdue follow-ups
           </p>
         )}
 
         <ul className="divide-y divide-border sm:hidden">
           {filtered.map((l) => (
-            <li key={l.id} className="px-3 py-3">
+            <li key={l.id} className="cursor-pointer px-3 py-3" onClick={() => setSelected(l)}>
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="truncate font-medium">{l.name}</p>
@@ -362,6 +481,7 @@ function LeadsDesk() {
               </div>
               <p className="mt-2 text-xs text-muted-foreground">
                 {l.source} · <span className="tabular-nums text-foreground">{l.value ? inr(l.value) : "—"}</span> · {l.assigned}
+                {l.nextFollow !== "—" ? ` · ${l.nextFollow}` : ""}
               </p>
             </li>
           ))}
@@ -372,7 +492,7 @@ function LeadsDesk() {
           <table className="w-full border-collapse text-sm">
             <thead>
               <tr className="border-b border-border bg-secondary/40 text-left text-[0.65rem] uppercase tracking-[0.08em] text-muted-foreground">
-                {["ID", "Business", "Contact", "Source", "Stage", "Value", "Assigned"].map((h) => (
+                {["ID", "Business", "Contact", "Source", "Stage", "Value", "Assigned", "Next follow-up"].map((h) => (
                   <th key={h} className="px-3 py-2 font-medium first:pl-4 last:pr-4">
                     {h}
                   </th>
@@ -381,13 +501,15 @@ function LeadsDesk() {
             </thead>
             <tbody>
               {filtered.map((l) => (
-                <tr key={l.id} className="border-b border-border last:border-0 hover:bg-secondary/30">
+                <tr
+                  key={l.id}
+                  className="cursor-pointer border-b border-border last:border-0 hover:bg-secondary/30"
+                  onClick={() => setSelected(l)}
+                >
                   <td className="px-3 py-2.5 pl-4 font-medium tabular-nums">{l.id}</td>
                   <td className="max-w-[14rem] px-3 py-2.5">
                     <p className="truncate font-medium">{l.name}</p>
-                    {l.requirement !== "—" && (
-                      <p className="truncate text-xs text-muted-foreground">{l.requirement}</p>
-                    )}
+                    {l.requirement !== "—" && <p className="truncate text-xs text-muted-foreground">{l.requirement}</p>}
                   </td>
                   <td className="px-3 py-2.5 text-muted-foreground">{contactLine(l)}</td>
                   <td className="px-3 py-2.5 text-muted-foreground">{l.source}</td>
@@ -395,7 +517,8 @@ function LeadsDesk() {
                     <Badge tone={stageTone(l.stage)}>{STAGE_LABEL[l.stage] || l.stage}</Badge>
                   </td>
                   <td className="px-3 py-2.5 tabular-nums">{l.value ? inr(l.value) : "—"}</td>
-                  <td className="px-3 py-2.5 pr-4 text-muted-foreground">{l.assigned}</td>
+                  <td className="px-3 py-2.5 text-muted-foreground">{l.assigned}</td>
+                  <td className={cn("px-3 py-2.5 pr-4", l.overdue && "text-destructive")}>{l.nextFollow}</td>
                 </tr>
               ))}
             </tbody>
@@ -415,11 +538,13 @@ function LeadsDesk() {
             <div className="mt-4 space-y-3">
               {(
                 [
-                  ["business_name", "Business name", "text", true],
+                  ["business_name", "Name", "text", true],
                   ["contact_person", "Contact person", "text", false],
                   ["phone", "Phone", "tel", false],
-                  ["product_requirement", "Requirement", "text", false],
-                  ["estimated_value", "Est. value (₹)", "number", false],
+                  ["gstin", "GSTIN", "text", false],
+                  ["location", "City", "text", false],
+                  ["product_requirement", "Product interest", "text", false],
+                  ["estimated_value", "Estimated value (₹)", "number", false],
                 ] as const
               ).map(([key, label, type, required]) => (
                 <label key={key} className="block text-sm text-muted-foreground">
@@ -441,11 +566,44 @@ function LeadsDesk() {
                   onChange={(e) => setForm((f) => ({ ...f, source: e.target.value }))}
                 >
                   <option>WhatsApp</option>
+                  <option>Call</option>
+                  <option>Visit</option>
                   <option>Referral</option>
-                  <option>Field visit</option>
                   <option>Website</option>
                   <option>Other</option>
                 </select>
+              </label>
+              <label className="block text-sm text-muted-foreground">
+                Type
+                <select
+                  className={cn(inputCls, "mt-1 w-full")}
+                  value={form.lead_type}
+                  onChange={(e) => setForm((f) => ({ ...f, lead_type: e.target.value }))}
+                >
+                  <option value="wholesale">Wholesale</option>
+                  <option value="retail">Retail</option>
+                </select>
+              </label>
+              <label className="block text-sm text-muted-foreground">
+                Priority
+                <select
+                  className={cn(inputCls, "mt-1 w-full")}
+                  value={form.priority}
+                  onChange={(e) => setForm((f) => ({ ...f, priority: e.target.value }))}
+                >
+                  <option value="high">High</option>
+                  <option value="medium">Medium</option>
+                  <option value="low">Low</option>
+                </select>
+              </label>
+              <label className="block text-sm text-muted-foreground">
+                Notes
+                <textarea
+                  className={cn(inputCls, "mt-1 w-full text-foreground")}
+                  rows={2}
+                  value={form.notes}
+                  onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                />
               </label>
             </div>
             {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
@@ -458,6 +616,130 @@ function LeadsDesk() {
               </button>
             </div>
           </form>
+        </div>
+      )}
+
+      {selected && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-4">
+          <button type="button" className="absolute inset-0 bg-foreground/40" aria-label="Close" onClick={() => setSelected(null)} />
+          <div className="relative z-10 w-full max-h-[90dvh] overflow-y-auto rounded-t-2xl border border-border bg-card p-5 sm:max-w-lg sm:rounded-2xl">
+            <h2 className="text-lg font-semibold">{selected.name}</h2>
+            <p className="text-sm text-muted-foreground">
+              {selected.id} · {contactLine(selected)} · {selected.type}
+            </p>
+            <div className="mt-3 flex flex-wrap gap-1">
+              {PIPELINE.filter((s) => s !== "lost").map((s) => (
+                <button
+                  key={s}
+                  type="button"
+                  disabled={!selected.rawId || busy}
+                  onClick={() => void patchLead(selected.rawId, { status: s })}
+                  className={cn(
+                    "rounded-full px-2.5 py-1 text-xs",
+                    selected.stage === s ? "bg-primary text-primary-foreground" : "border border-border",
+                  )}
+                >
+                  {STAGE_LABEL[s]}
+                </button>
+              ))}
+              <button
+                type="button"
+                disabled={!selected.rawId || busy}
+                onClick={() => void patchLead(selected.rawId, { status: "lost", lost_reason: "Lost" })}
+                className="rounded-full border border-destructive/40 px-2.5 py-1 text-xs text-destructive"
+              >
+                Lost
+              </button>
+            </div>
+            <dl className="mt-4 grid grid-cols-2 gap-2 text-sm">
+              <div>
+                <dt className="text-xs text-muted-foreground">Source</dt>
+                <dd>{selected.source}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Priority</dt>
+                <dd className="capitalize">{selected.priority}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">GSTIN</dt>
+                <dd>{selected.gstin || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">City</dt>
+                <dd>{selected.location || "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Est. value</dt>
+                <dd>{selected.value ? inr(selected.value) : "—"}</dd>
+              </div>
+              <div>
+                <dt className="text-xs text-muted-foreground">Next follow-up</dt>
+                <dd className={selected.overdue ? "text-destructive" : ""}>{selected.nextFollow}</dd>
+              </div>
+            </dl>
+            {selected.notes && <p className="mt-3 text-sm text-muted-foreground">{selected.notes}</p>}
+            <div className="mt-4 space-y-2">
+              <p className="text-sm font-medium">Follow-up</p>
+              <textarea
+                className={cn(inputCls, "w-full")}
+                rows={2}
+                placeholder="Call notes / next action"
+                value={followNote}
+                onChange={(e) => setFollowNote(e.target.value)}
+              />
+              <input type="datetime-local" className={cn(inputCls, "w-full")} value={followDate} onChange={(e) => setFollowDate(e.target.value)} />
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  disabled={busy || !selected.rawId}
+                  onClick={() => void saveFollowUp("follow_up")}
+                  className="rounded-lg border border-border py-2 text-sm"
+                >
+                  Save follow-up
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !selected.rawId}
+                  onClick={() => void saveFollowUp("call")}
+                  className="rounded-lg border border-border py-2 text-sm"
+                >
+                  Log call
+                </button>
+              </div>
+            </div>
+            {activities.length > 0 && (
+              <ul className="mt-4 space-y-2 border-t border-border pt-3 text-sm">
+                {activities.map((a) => (
+                  <li key={a.id}>
+                    <span className="capitalize text-muted-foreground">{a.kind}</span>
+                    {a.notes ? ` · ${a.notes}` : ""}
+                    <span className="block text-xs text-muted-foreground">{new Date(a.created_at).toLocaleString("en-IN")}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
+            <div className="mt-4 grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                disabled={busy || !selected.rawId || !!selected.customerId}
+                onClick={() => void convertSelected()}
+                className="rounded-lg bg-primary py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-50"
+              >
+                {selected.customerId ? "Converted" : "Convert to customer"}
+              </button>
+              <Link
+                to="/sales"
+                className="rounded-lg border border-border py-2.5 text-center text-sm"
+                onClick={() => setSelected(null)}
+              >
+                Create quotation
+              </Link>
+            </div>
+            <button type="button" onClick={() => setSelected(null)} className="mt-2 w-full rounded-lg border border-border py-2.5 text-sm">
+              Close
+            </button>
+          </div>
         </div>
       )}
     </div>

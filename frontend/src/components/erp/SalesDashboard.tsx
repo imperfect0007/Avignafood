@@ -1,24 +1,38 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ClipboardPen } from "lucide-react";
-import { api, mediaUrl } from "@/lib/api";
+import { ClipboardList } from "lucide-react";
+import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
 import { greeting } from "@/lib/format";
-import { VehicleGlance } from "@/components/erp/VehicleBoard";
+import { inr } from "@/lib/erp-data";
+import { todayIso, VehicleGlance } from "@/components/erp/VehicleBoard";
 
 type Visit = {
   id: number;
   site_name: string;
   checked_in_at: string;
-  sales_order_id: number | null;
-  customer_id: number | null;
-  media: { url: string; kind: string }[];
+  purpose: string | null;
 };
+
+type StockRow = { id: number; product_id: number; quantity: string | number };
+type Product = { id: number; name: string; unit: string; selling_price?: string | number };
+
+const LOW = 250;
+
+function isoDay(d: Date | string) {
+  const x = typeof d === "string" ? new Date(d) : d;
+  const y = x.getFullYear();
+  const m = String(x.getMonth() + 1).padStart(2, "0");
+  const day = String(x.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
 
 export function SalesDashboard() {
   const { me } = useMe();
-  const name = me?.user.full_name?.split(" ")[0] || "there";
+  const name = me?.user.full_name?.split(" ")[0] || "Sales";
+  const [workDate, setWorkDate] = useState(todayIso);
   const [visits, setVisits] = useState<Visit[]>([]);
+  const [stock, setStock] = useState<{ name: string; qty: number; unit: string; selling: number }[]>([]);
 
   useEffect(() => {
     api<Visit[]>("/api/v1/visits")
@@ -26,55 +40,107 @@ export function SalesDashboard() {
       .catch(() => setVisits([]));
   }, []);
 
-  const today = useMemo(
-    () =>
-      visits.filter((v) => new Date(v.checked_in_at).toDateString() === new Date().toDateString()),
-    [visits],
+  useEffect(() => {
+    Promise.all([
+      api<StockRow[]>("/api/v1/inventory/stock").catch(() => [] as StockRow[]),
+      api<Product[]>("/api/v1/products").catch(() => [] as Product[]),
+    ]).then(([rows, products]) => {
+      if (!rows.length) {
+        setStock(
+          [
+            { name: "Nutragain Flour", qty: 1250, unit: "KG", selling: 50 },
+            { name: "Besan", qty: 850, unit: "KG", selling: 70 },
+            { name: "Suji", qty: 620, unit: "KG", selling: 80 },
+            { name: "Rava", qty: 480, unit: "KG", selling: 60 },
+            { name: "Maida", qty: 210, unit: "KG", selling: 45 },
+            { name: "Poha", qty: 180, unit: "KG", selling: 55 },
+          ].sort((a, b) => b.qty - a.qty),
+        );
+        return;
+      }
+      const names = Object.fromEntries(products.map((p) => [p.id, p]));
+      const merged = rows.map((r) => {
+        const p = names[r.product_id];
+        return { name: p?.name || `Product ${r.product_id}`, qty: Number(r.quantity) || 0, unit: p?.unit || "KG", selling: Number(p?.selling_price) || 0 };
+      });
+      merged.sort((a, b) => b.qty - a.qty);
+      setStock(merged);
+    });
+  }, []);
+
+  const todayVisits = useMemo(
+    () => visits.filter((v) => isoDay(v.checked_in_at) === workDate),
+    [visits, workDate],
   );
+  const glance = stock.slice(0, 4);
 
   return (
     <div className="space-y-5">
       <div>
-        <h1 className="font-[Fraunces,Georgia,serif] text-3xl leading-tight">
+        <h1 className="text-2xl font-semibold leading-tight">
           {greeting()}, {name}
         </h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Log the visit. Call the team before you promise stock.
-        </p>
+        <p className="mt-1 text-sm text-muted-foreground">Log the visit. Call the team before you promise stock.</p>
       </div>
 
       <Link
         to="/field"
-        className="flex min-h-24 items-center justify-center gap-3 rounded-3xl bg-primary px-4 text-lg font-semibold text-primary-foreground"
+        className="flex min-h-16 w-full items-center justify-center gap-2 rounded-2xl bg-primary text-lg font-semibold text-primary-foreground active:scale-[0.99]"
       >
-        <ClipboardPen className="size-7" />
+        <ClipboardList className="size-6" />
         Log a visit
       </Link>
 
-      <VehicleGlance />
+      <VehicleGlance onDate={workDate} onDateChange={setWorkDate} />
 
       <section>
-        <h2 className="mb-2 text-sm font-medium text-muted-foreground">
-          Today · {today.length} visit{today.length === 1 ? "" : "s"}
-        </h2>
-        <ul className="space-y-2">
-          {today.map((v) => (
-            <li key={v.id} className="rounded-2xl border border-border bg-card p-3">
-              <p className="font-medium">{v.site_name}</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                {new Date(v.checked_in_at).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" })}
-                {v.sales_order_id ? " · new order" : v.customer_id ? " · new client" : ""}
-              </p>
-              {v.media[0] && (
-                <img src={mediaUrl(v.media[0].url)} alt="" className="mt-2 h-24 w-full rounded-xl object-cover" />
-              )}
+        <p className="text-sm font-medium">
+          Today · {todayVisits.length} visit{todayVisits.length === 1 ? "" : "s"}
+        </p>
+        {todayVisits.length ? (
+          <ul className="mt-2 space-y-2">
+            {todayVisits.map((v) => (
+              <li key={v.id} className="flex items-center justify-between rounded-2xl border border-border bg-card px-3 py-3">
+                <span>
+                  <span className="block font-medium">{v.site_name}</span>
+                  <span className="text-xs text-muted-foreground">
+                    {new Date(v.checked_in_at).toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit" })}
+                  </span>
+                </span>
+                <span className="text-xs font-medium text-primary">Completed</span>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <p className="mt-2 rounded-2xl border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+            Nothing logged yet today.
+          </p>
+        )}
+      </section>
+
+      <section>
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-medium">Inventory at a glance</p>
+          <Link to="/inventory" className="text-sm text-primary">
+            View all
+          </Link>
+        </div>
+        <ul className="mt-2 space-y-2">
+          {glance.map((s) => (
+            <li key={s.name} className="flex items-center justify-between rounded-2xl border border-border bg-card px-3 py-3">
+              <span>
+                <span className="block font-medium">{s.name}</span>
+                <span className="text-xs tabular-nums text-muted-foreground">
+                  {s.qty.toLocaleString("en-IN")} {s.unit}
+                  {s.selling ? ` · ${inr(s.selling)} / ${s.unit}` : ""}
+                </span>
+              </span>
+              <span className={s.qty <= LOW ? "text-xs font-semibold text-warning" : "text-xs font-semibold text-primary"}>
+                {s.qty <= 0 ? "Out" : s.qty <= LOW ? "Low stock" : "Available"}
+              </span>
             </li>
           ))}
-          {!today.length && (
-            <li className="rounded-2xl border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              Nothing logged yet today.
-            </li>
-          )}
+          {!glance.length && <li className="text-sm text-muted-foreground">No stock listed for this firm.</li>}
         </ul>
       </section>
     </div>

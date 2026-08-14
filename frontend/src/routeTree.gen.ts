@@ -13,6 +13,8 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as AnalyticsRouteImport } from './routes/analytics'
 import { Route as ClientsRouteImport } from './routes/clients'
+import { Route as CollectionRouteImport } from './routes/collection'
+import { Route as CreditRouteImport } from './routes/credit'
 import { Route as CustomersRouteImport } from './routes/customers'
 import { Route as DeliveriesRouteImport } from './routes/deliveries'
 import { Route as DispatchRouteImport } from './routes/dispatch'
@@ -21,11 +23,14 @@ import { Route as InventoryRouteImport } from './routes/inventory'
 import { Route as InvoicesRouteImport } from './routes/invoices'
 import { Route as LeadsRouteImport } from './routes/leads'
 import { Route as LoginRouteImport } from './routes/login'
+import { Route as MoreRouteImport } from './routes/more'
 import { Route as OpsRouteImport } from './routes/ops'
+import { Route as PaymentsRouteImport } from './routes/payments'
 import { Route as PodRouteImport } from './routes/pod'
 import { Route as ProfileRouteImport } from './routes/profile'
 import { Route as PurchasesRouteImport } from './routes/purchases'
 import { Route as ReceivablesRouteImport } from './routes/receivables'
+import { Route as ReportsRouteImport } from './routes/reports'
 import { Route as RunsRouteImport } from './routes/runs'
 import { Route as SalesRouteImport } from './routes/sales'
 
@@ -47,6 +52,16 @@ const AnalyticsRoute = AnalyticsRouteImport.update({
 const ClientsRoute = ClientsRouteImport.update({
   id: '/clients',
   path: '/clients',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CollectionRoute = CollectionRouteImport.update({
+  id: '/collection',
+  path: '/collection',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const CreditRoute = CreditRouteImport.update({
+  id: '/credit',
+  path: '/credit',
   getParentRoute: () => rootRouteImport,
 } as any)
 const CustomersRoute = CustomersRouteImport.update({
@@ -89,9 +104,19 @@ const LoginRoute = LoginRouteImport.update({
   path: '/login',
   getParentRoute: () => rootRouteImport,
 } as any)
+const MoreRoute = MoreRouteImport.update({
+  id: '/more',
+  path: '/more',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OpsRoute = OpsRouteImport.update({
   id: '/ops',
   path: '/ops',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PaymentsRoute = PaymentsRouteImport.update({
+  id: '/payments',
+  path: '/payments',
   getParentRoute: () => rootRouteImport,
 } as any)
 const PodRoute = PodRouteImport.update({
@@ -114,6 +139,11 @@ const ReceivablesRoute = ReceivablesRouteImport.update({
   path: '/receivables',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ReportsRoute = ReportsRouteImport.update({
+  id: '/reports',
+  path: '/reports',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const RunsRoute = RunsRouteImport.update({
   id: '/runs',
   path: '/runs',
@@ -130,6 +160,8 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/analytics': typeof AnalyticsRoute
   '/clients': typeof ClientsRoute
+  '/collection': typeof CollectionRoute
+  '/credit': typeof CreditRoute
   '/customers': typeof CustomersRoute
   '/deliveries': typeof DeliveriesRoute
   '/dispatch': typeof DispatchRoute
@@ -138,11 +170,14 @@ export interface FileRoutesByFullPath {
   '/invoices': typeof InvoicesRoute
   '/leads': typeof LeadsRoute
   '/login': typeof LoginRoute
+  '/more': typeof MoreRoute
   '/ops': typeof OpsRoute
+  '/payments': typeof PaymentsRoute
   '/pod': typeof PodRoute
   '/profile': typeof ProfileRoute
   '/purchases': typeof PurchasesRoute
   '/receivables': typeof ReceivablesRoute
+  '/reports': typeof ReportsRoute
   '/runs': typeof RunsRoute
   '/sales': typeof SalesRoute
 }
@@ -151,6 +186,8 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/analytics': typeof AnalyticsRoute
   '/clients': typeof ClientsRoute
+  '/collection': typeof CollectionRoute
+  '/credit': typeof CreditRoute
   '/customers': typeof CustomersRoute
   '/deliveries': typeof DeliveriesRoute
   '/dispatch': typeof DispatchRoute
@@ -159,11 +196,14 @@ export interface FileRoutesByTo {
   '/invoices': typeof InvoicesRoute
   '/leads': typeof LeadsRoute
   '/login': typeof LoginRoute
+  '/more': typeof MoreRoute
   '/ops': typeof OpsRoute
+  '/payments': typeof PaymentsRoute
   '/pod': typeof PodRoute
   '/profile': typeof ProfileRoute
   '/purchases': typeof PurchasesRoute
   '/receivables': typeof ReceivablesRoute
+  '/reports': typeof ReportsRoute
   '/runs': typeof RunsRoute
   '/sales': typeof SalesRoute
 }
@@ -173,6 +213,8 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/analytics': typeof AnalyticsRoute
   '/clients': typeof ClientsRoute
+  '/collection': typeof CollectionRoute
+  '/credit': typeof CreditRoute
   '/customers': typeof CustomersRoute
   '/deliveries': typeof DeliveriesRoute
   '/dispatch': typeof DispatchRoute
@@ -181,11 +223,14 @@ export interface FileRoutesById {
   '/invoices': typeof InvoicesRoute
   '/leads': typeof LeadsRoute
   '/login': typeof LoginRoute
+  '/more': typeof MoreRoute
   '/ops': typeof OpsRoute
+  '/payments': typeof PaymentsRoute
   '/pod': typeof PodRoute
   '/profile': typeof ProfileRoute
   '/purchases': typeof PurchasesRoute
   '/receivables': typeof ReceivablesRoute
+  '/reports': typeof ReportsRoute
   '/runs': typeof RunsRoute
   '/sales': typeof SalesRoute
 }
@@ -196,6 +241,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/analytics'
     | '/clients'
+    | '/collection'
+    | '/credit'
     | '/customers'
     | '/deliveries'
     | '/dispatch'
@@ -204,11 +251,14 @@ export interface FileRouteTypes {
     | '/invoices'
     | '/leads'
     | '/login'
+    | '/more'
     | '/ops'
+    | '/payments'
     | '/pod'
     | '/profile'
     | '/purchases'
     | '/receivables'
+    | '/reports'
     | '/runs'
     | '/sales'
   fileRoutesByTo: FileRoutesByTo
@@ -217,6 +267,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/analytics'
     | '/clients'
+    | '/collection'
+    | '/credit'
     | '/customers'
     | '/deliveries'
     | '/dispatch'
@@ -225,11 +277,14 @@ export interface FileRouteTypes {
     | '/invoices'
     | '/leads'
     | '/login'
+    | '/more'
     | '/ops'
+    | '/payments'
     | '/pod'
     | '/profile'
     | '/purchases'
     | '/receivables'
+    | '/reports'
     | '/runs'
     | '/sales'
   id:
@@ -238,6 +293,8 @@ export interface FileRouteTypes {
     | '/admin'
     | '/analytics'
     | '/clients'
+    | '/collection'
+    | '/credit'
     | '/customers'
     | '/deliveries'
     | '/dispatch'
@@ -246,11 +303,14 @@ export interface FileRouteTypes {
     | '/invoices'
     | '/leads'
     | '/login'
+    | '/more'
     | '/ops'
+    | '/payments'
     | '/pod'
     | '/profile'
     | '/purchases'
     | '/receivables'
+    | '/reports'
     | '/runs'
     | '/sales'
   fileRoutesById: FileRoutesById
@@ -260,6 +320,8 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AnalyticsRoute: typeof AnalyticsRoute
   ClientsRoute: typeof ClientsRoute
+  CollectionRoute: typeof CollectionRoute
+  CreditRoute: typeof CreditRoute
   CustomersRoute: typeof CustomersRoute
   DeliveriesRoute: typeof DeliveriesRoute
   DispatchRoute: typeof DispatchRoute
@@ -268,11 +330,14 @@ export interface RootRouteChildren {
   InvoicesRoute: typeof InvoicesRoute
   LeadsRoute: typeof LeadsRoute
   LoginRoute: typeof LoginRoute
+  MoreRoute: typeof MoreRoute
   OpsRoute: typeof OpsRoute
+  PaymentsRoute: typeof PaymentsRoute
   PodRoute: typeof PodRoute
   ProfileRoute: typeof ProfileRoute
   PurchasesRoute: typeof PurchasesRoute
   ReceivablesRoute: typeof ReceivablesRoute
+  ReportsRoute: typeof ReportsRoute
   RunsRoute: typeof RunsRoute
   SalesRoute: typeof SalesRoute
 }
@@ -305,6 +370,20 @@ declare module '@tanstack/react-router' {
       path: '/clients'
       fullPath: '/clients'
       preLoaderRoute: typeof ClientsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/collection': {
+      id: '/collection'
+      path: '/collection'
+      fullPath: '/collection'
+      preLoaderRoute: typeof CollectionRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/credit': {
+      id: '/credit'
+      path: '/credit'
+      fullPath: '/credit'
+      preLoaderRoute: typeof CreditRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/customers': {
@@ -363,11 +442,25 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/more': {
+      id: '/more'
+      path: '/more'
+      fullPath: '/more'
+      preLoaderRoute: typeof MoreRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/ops': {
       id: '/ops'
       path: '/ops'
       fullPath: '/ops'
       preLoaderRoute: typeof OpsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/payments': {
+      id: '/payments'
+      path: '/payments'
+      fullPath: '/payments'
+      preLoaderRoute: typeof PaymentsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/pod': {
@@ -398,6 +491,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ReceivablesRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/reports': {
+      id: '/reports'
+      path: '/reports'
+      fullPath: '/reports'
+      preLoaderRoute: typeof ReportsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/runs': {
       id: '/runs'
       path: '/runs'
@@ -420,6 +520,8 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AnalyticsRoute: AnalyticsRoute,
   ClientsRoute: ClientsRoute,
+  CollectionRoute: CollectionRoute,
+  CreditRoute: CreditRoute,
   CustomersRoute: CustomersRoute,
   DeliveriesRoute: DeliveriesRoute,
   DispatchRoute: DispatchRoute,
@@ -428,11 +530,14 @@ const rootRouteChildren: RootRouteChildren = {
   InvoicesRoute: InvoicesRoute,
   LeadsRoute: LeadsRoute,
   LoginRoute: LoginRoute,
+  MoreRoute: MoreRoute,
   OpsRoute: OpsRoute,
+  PaymentsRoute: PaymentsRoute,
   PodRoute: PodRoute,
   ProfileRoute: ProfileRoute,
   PurchasesRoute: PurchasesRoute,
   ReceivablesRoute: ReceivablesRoute,
+  ReportsRoute: ReportsRoute,
   RunsRoute: RunsRoute,
   SalesRoute: SalesRoute,
 }

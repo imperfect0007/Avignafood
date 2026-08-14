@@ -2,9 +2,19 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState, type FormEvent } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company-context";
-import { byFirm, kpisFor, mt, stock as mockStock } from "@/lib/erp-data";
+import { useMe } from "@/lib/me-context";
+import { byFirm, firms, inr, kpisFor, mt, stock as mockStock } from "@/lib/erp-data";
 import { Badge, Kpi, PageHeader, Panel, Table, Td } from "@/components/erp/ui-bits";
 import { cn } from "@/lib/utils";
+import { ChevronLeft } from "lucide-react";
+import { CompanyPick, useCompanies, type CompanyOpt } from "@/components/erp/sales-field";
+
+const FOUR_FIRMS: CompanyOpt[] = firms.map((f) => ({
+  id: f.companyId,
+  legal_name: f.name,
+  trade_name: f.short,
+  logo_url: f.logo,
+}));
 
 export const Route = createFileRoute("/inventory")({
   head: () => ({
@@ -24,6 +34,7 @@ type Product = {
   name: string;
   unit: string;
   base_price: string | number;
+  selling_price?: string | number;
 };
 
 type Warehouse = { id: number; name: string; is_default: boolean };
@@ -74,7 +85,199 @@ function formatWhen(iso: string) {
   }
 }
 
+const LOW = 250;
+
+const DUMMY_STOCK = [
+  { name: "Nutragain Flour", unit: "KG", sku: "NF-500", qty: 1250, selling: 50 },
+  { name: "Besan", unit: "KG", sku: "BS-50", qty: 850, selling: 70 },
+  { name: "Suji", unit: "KG", sku: "SJ-50", qty: 620, selling: 80 },
+  { name: "Rava", unit: "KG", sku: "RV-50", qty: 480, selling: 60 },
+  { name: "Maida", unit: "KG", sku: "MD-50", qty: 210, selling: 45 },
+  { name: "Poha", unit: "KG", sku: "PH-50", qty: 180, selling: 55 },
+];
+
+function SalesStock() {
+  const fromApi = useCompanies();
+  const companies = FOUR_FIRMS.map((f) => fromApi.find((c) => c.id === f.id) || f);
+  const [companyId, setCompanyId] = useState<number | null>(null);
+  const [q, setQ] = useState("");
+  const [filter, setFilter] = useState<"all" | "low" | "fast">("all");
+  const [rows, setRows] = useState<{ name: string; unit: string; qty: number; sku: string; selling: number }[]>([]);
+  const [open, setOpen] = useState<(typeof rows)[number] | null>(null);
+
+  function pickFirm(id: number) {
+    setCompanyId(id);
+    setOpen(null);
+  }
+
+  useEffect(() => {
+    if (!companyId) {
+      setRows([]);
+      return;
+    }
+    Promise.all([
+      api<{ product_id: number; quantity: string | number }[]>("/api/v1/inventory/stock", { companyId }).catch(() => []),
+      api<{ id: number; name: string; unit: string; sku: string; selling_price?: string | number }[]>("/api/v1/products", {
+        companyId,
+      }).catch(() => []),
+    ]).then(([stock, products]) => {
+      if (!stock.length) {
+        setRows(
+          DUMMY_STOCK.map((r) => ({
+            ...r,
+            qty: r.name === "Maida" || r.name === "Poha" ? r.qty : r.qty + ((companyId - 1) % 4) * 35,
+          })),
+        );
+        return;
+      }
+      const map = Object.fromEntries(products.map((p) => [p.id, p]));
+      setRows(
+        stock.map((s) => {
+          const p = map[s.product_id];
+          return {
+            name: p?.name || `Product ${s.product_id}`,
+            unit: p?.unit || "KG",
+            sku: p?.sku || "",
+            qty: Number(s.quantity) || 0,
+            selling: Number(p?.selling_price) || 0,
+          };
+        }),
+      );
+    });
+  }, [companyId]);
+
+  const firmLabel = companies.find((c) => c.id === companyId);
+  const shown = rows.filter((r) => {
+    if (q.trim() && !`${r.name} ${r.sku}`.toLowerCase().includes(q.trim().toLowerCase())) return false;
+    if (filter === "low") return r.qty <= LOW;
+    if (filter === "fast") return r.qty > 0;
+    return true;
+  });
+
+  if (!companyId) {
+    return (
+      <div className="space-y-4">
+        <div>
+          <h1 className="text-2xl font-semibold">Inventory</h1>
+          <p className="mt-1 text-sm text-muted-foreground">Pick a firm first. Stock is shown for that company only.</p>
+        </div>
+        <div>
+          <p className="mb-2 text-sm font-medium">Which firm?</p>
+          <CompanyPick companies={companies} value={companyId} onChange={pickFirm} />
+        </div>
+      </div>
+    );
+  }
+
+  function backToFirms() {
+    setOpen(null);
+    setQ("");
+    setFilter("all");
+    setCompanyId(null);
+  }
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <button
+          type="button"
+          onClick={backToFirms}
+          className="mb-2 flex min-h-10 items-center gap-1 text-sm font-medium text-primary"
+        >
+          <ChevronLeft className="size-5" />
+          Back
+        </button>
+        <h1 className="text-2xl font-semibold">Inventory</h1>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Available stock · {firmLabel?.trade_name || firmLabel?.legal_name || "Selected firm"}. View only.
+        </p>
+      </div>
+      <input
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="Search"
+        className="w-full rounded-xl border border-border bg-card px-3 py-2.5 text-sm"
+      />
+      <div className="flex gap-1">
+        {(
+          [
+            ["all", "All items"],
+            ["low", "Low stock"],
+            ["fast", "Fast moving"],
+          ] as const
+        ).map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setFilter(id)}
+            className={cn("rounded-full px-3 py-1.5 text-sm", filter === id ? "bg-primary text-primary-foreground" : "border border-border")}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <ul className="space-y-2">
+        {shown.map((r) => (
+          <li key={r.sku || r.name}>
+            <button
+              type="button"
+              onClick={() => setOpen(r)}
+              className="flex w-full items-center justify-between rounded-2xl border border-border bg-card px-3 py-3 text-left"
+            >
+              <span>
+                <span className="block font-medium">{r.name}</span>
+                <span className="text-xs text-muted-foreground">{r.unit}</span>
+                <span className="mt-1 block text-sm font-semibold tabular-nums">
+                  {r.selling ? `${inr(r.selling)} / ${r.unit}` : "Selling —"}
+                </span>
+              </span>
+              <span className="text-right">
+                <span className="block tabular-nums font-semibold">
+                  {r.qty.toLocaleString("en-IN")} {r.unit}
+                </span>
+                <span className={cn("text-xs font-semibold", r.qty <= LOW ? "text-warning" : "text-primary")}>
+                  {r.qty <= 0 ? "Out" : r.qty <= LOW ? "Low stock" : "Available"}
+                </span>
+              </span>
+            </button>
+          </li>
+        ))}
+        {!shown.length && <li className="py-8 text-center text-sm text-muted-foreground">No stock to show.</li>}
+      </ul>
+      {open && (
+        <div className="fixed inset-0 z-40">
+          <button type="button" className="absolute inset-0 bg-foreground/40" aria-label="Close" onClick={() => setOpen(null)} />
+          <div className="absolute inset-x-0 bottom-0 rounded-t-2xl border border-border bg-card px-4 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4 shadow-[var(--shadow-soft)]">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="font-semibold">{open.name}</p>
+                <p className="text-xs text-muted-foreground">{open.unit}</p>
+              </div>
+              <button type="button" className="text-sm text-primary" onClick={() => setOpen(null)}>
+                Close
+              </button>
+            </div>
+            <p className="mt-4 text-xs text-muted-foreground">Selling price</p>
+            <p className="text-2xl font-semibold tabular-nums">{open.selling ? inr(open.selling) : "—"}</p>
+            {open.selling ? <p className="text-sm text-muted-foreground">per {open.unit}</p> : null}
+            <p className="mt-3 text-sm tabular-nums">
+              {open.qty.toLocaleString("en-IN")} {open.unit} ·{" "}
+              {open.qty <= 0 ? "Out" : open.qty <= LOW ? "Low stock" : "Available"}
+            </p>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Inventory() {
+  const { me } = useMe();
+  if (me?.user.role === "sales") return <SalesStock />;
+  return <OpsInventory />;
+}
+
+function OpsInventory() {
   const { firm } = useCompany();
   const [rows, setRows] = useState<Row[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -91,6 +294,7 @@ function Inventory() {
     name: "",
     unit: "MT",
     base_price: "0",
+    selling_price: "0",
   });
   const [inboundForm, setInboundForm] = useState({
     product_id: "",
@@ -199,7 +403,7 @@ function Inventory() {
 
   function openProduct() {
     setError("");
-    setProductForm({ sku: "", name: "", unit: "MT", base_price: "0" });
+    setProductForm({ sku: "", name: "", unit: "MT", base_price: "0", selling_price: "0" });
     setModal("product");
   }
 
@@ -236,6 +440,7 @@ function Inventory() {
           name: productForm.name.trim(),
           unit: productForm.unit.trim() || "MT",
           base_price: Number(productForm.base_price) || 0,
+          selling_price: Number(productForm.selling_price) || Number(productForm.base_price) || 0,
         }),
       });
       setModal(null);
@@ -515,7 +720,7 @@ function Inventory() {
                   />
                 </label>
                 <label className="block text-sm text-muted-foreground">
-                  Base price (₹)
+                  Wholesale / floor (₹)
                   <input
                     type="number"
                     min={0}
@@ -525,6 +730,16 @@ function Inventory() {
                   />
                 </label>
               </div>
+              <label className="block text-sm text-muted-foreground">
+                Selling price (₹)
+                <input
+                  type="number"
+                  min={0}
+                  className={inputCls}
+                  value={productForm.selling_price}
+                  onChange={(e) => setProductForm((f) => ({ ...f, selling_price: e.target.value }))}
+                />
+              </label>
             </div>
             {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
             <div className="mt-5 grid grid-cols-2 gap-2">
