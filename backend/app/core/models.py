@@ -128,6 +128,7 @@ class User(Base):
     role_id: Mapped[int] = mapped_column(ForeignKey("roles.id"), nullable=False)
     email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
     full_name: Mapped[str] = mapped_column(String(120), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(30))
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -186,6 +187,41 @@ class Customer(Base):
     credit_days: Mapped[int] = mapped_column(Integer, default=30)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    legal_name: Mapped[str | None] = mapped_column(String(200))
+    trade_name: Mapped[str | None] = mapped_column(String(200))
+    billing_address: Mapped[str | None] = mapped_column(Text)
+    shipping_address: Mapped[str | None] = mapped_column(Text)
+    customer_type: Mapped[str | None] = mapped_column(String(40))  # wholesale | retail
+
+    contacts: Mapped[list["CustomerContact"]] = relationship(back_populates="customer", cascade="all, delete-orphan")
+
+
+class CustomerContact(Base):
+    __tablename__ = "customer_contacts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    name: Mapped[str] = mapped_column(String(120), nullable=False)
+    phone: Mapped[str | None] = mapped_column(String(30))
+    email: Mapped[str | None] = mapped_column(String(120))
+    designation: Mapped[str | None] = mapped_column(String(80))
+    is_primary: Mapped[bool] = mapped_column(Boolean, default=False)
+
+    customer: Mapped["Customer"] = relationship(back_populates="contacts")
+
+
+class CollectionFollowUp(Base):
+    __tablename__ = "collection_follow_ups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    invoice_id: Mapped[int | None] = mapped_column(ForeignKey("invoices.id"))
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    promised_date: Mapped[date | None] = mapped_column(Date)
+    notes: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class Lead(Base):
@@ -211,6 +247,25 @@ class Lead(Base):
     lost_reason: Mapped[str | None] = mapped_column(String(200))
     customer_id: Mapped[int | None] = mapped_column(ForeignKey("customers.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    gstin: Mapped[str | None] = mapped_column(String(20))
+    priority: Mapped[str | None] = mapped_column(String(20))  # high | medium | low
+    next_follow_up: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    activities: Mapped[list["LeadActivity"]] = relationship(back_populates="lead", cascade="all, delete-orphan")
+
+
+class LeadActivity(Base):
+    __tablename__ = "lead_activities"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    lead_id: Mapped[int] = mapped_column(ForeignKey("leads.id"), nullable=False)
+    user_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)  # note | call | visit | follow_up | stage
+    notes: Mapped[str | None] = mapped_column(Text)
+    next_action: Mapped[str | None] = mapped_column(String(200))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    lead: Mapped["Lead"] = relationship(back_populates="activities")
 
 
 class Product(Base):
@@ -225,6 +280,7 @@ class Product(Base):
     hsn_code: Mapped[str | None] = mapped_column(String(20))
     gst_rate: Mapped[Decimal] = mapped_column(Numeric(5, 2), default=0)
     base_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    selling_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -374,8 +430,11 @@ class SalesOrder(Base):
     created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     confirmed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    ops_status: Mapped[str] = mapped_column(String(40), default="pending_verify")
-    # pending_verify | shortage | procuring | ready | allocated | dispatched
+    ops_status: Mapped[str] = mapped_column(String(40), default="pending_approval")
+    # pending_approval → Superadmin
+    # awaiting_invoice → Accounts raises invoice
+    # pending_verify | shortage | procuring | ready → Supervisor
+    # allocated | dispatched → Logistics, then Accounts (payment)
 
     lines: Mapped[list["SalesOrderLine"]] = relationship(back_populates="sales_order", cascade="all, delete-orphan")
 
@@ -388,6 +447,7 @@ class SalesOrderLine(Base):
     product_id: Mapped[int] = mapped_column(ForeignKey("products.id"), nullable=False)
     quantity: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
     unit_price: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    outstanding_qty: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
 
     sales_order: Mapped["SalesOrder"] = relationship(back_populates="lines")
 
@@ -411,6 +471,12 @@ class Invoice(Base):
     tax_amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     total: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     amount_paid: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    credit_applied: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    debit_applied: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_via: Mapped[str | None] = mapped_column(String(40))
+    penalty_waived: Mapped[bool] = mapped_column(Boolean, default=False)
+    penalty_waiver_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     lines: Mapped[list["InvoiceLine"]] = relationship(back_populates="invoice", cascade="all, delete-orphan")
@@ -450,6 +516,25 @@ class Payment(Base):
     invoice: Mapped["Invoice"] = relationship(back_populates="payments")
 
 
+class CreditNote(Base):
+    """Credit or debit note against an invoice. Accounts posts; does not touch stock."""
+
+    __tablename__ = "credit_notes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    invoice_id: Mapped[int] = mapped_column(ForeignKey("invoices.id"), nullable=False)
+    kind: Mapped[str] = mapped_column(String(20), nullable=False)  # credit | debit
+    amount: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
+    reason: Mapped[str] = mapped_column(String(80), nullable=False)
+    remarks: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(20), default="posted")
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
 
@@ -484,6 +569,11 @@ class FieldVisit(Base):
     accuracy_m: Mapped[Decimal | None] = mapped_column(Numeric(8, 2))
     checked_in_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    purpose: Mapped[str | None] = mapped_column(String(40))  # prospecting | follow-up | collection | complaint | delivery_support
+    outcome: Mapped[str | None] = mapped_column(Text)
+    next_action: Mapped[str | None] = mapped_column(Text)
+    competitor_notes: Mapped[str | None] = mapped_column(Text)
+    issue: Mapped[str | None] = mapped_column(Text)
 
     media: Mapped[list["FieldVisitMedia"]] = relationship(back_populates="visit", cascade="all, delete-orphan")
 
@@ -557,4 +647,65 @@ class Delivery(Base):
     lat: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
     lng: Mapped[Decimal | None] = mapped_column(Numeric(10, 7))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class LogisticsRun(Base):
+    """One vehicle trip that may carry many sales orders."""
+
+    __tablename__ = "logistics_runs"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    number: Mapped[str] = mapped_column(String(40), nullable=False)
+    on_date: Mapped[date] = mapped_column(Date, nullable=False)
+    vehicle_id: Mapped[int | None] = mapped_column(ForeignKey("vehicles.id"))
+    driver_name: Mapped[str | None] = mapped_column(String(120))
+    agency: Mapped[str] = mapped_column(String(80), default="Own Vehicle")
+    route: Mapped[str | None] = mapped_column(String(200))
+    status: Mapped[str] = mapped_column(String(40), default="planned")
+    notes: Mapped[str | None] = mapped_column(Text)
+    slot: Mapped[str] = mapped_column(String(20), default="afternoon")  # morning | afternoon | evening
+    created_by_id: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    dispatched_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    stops: Mapped[list["LogisticsStop"]] = relationship(back_populates="run", cascade="all, delete-orphan")
+
+
+class LogisticsStop(Base):
+    __tablename__ = "logistics_stops"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    run_id: Mapped[int] = mapped_column(ForeignKey("logistics_runs.id"), nullable=False)
+    sales_order_id: Mapped[int] = mapped_column(ForeignKey("sales_orders.id"), nullable=False)
+    customer_id: Mapped[int] = mapped_column(ForeignKey("customers.id"), nullable=False)
+    dispatch_id: Mapped[int | None] = mapped_column(ForeignKey("dispatches.id"))
+    status: Mapped[str] = mapped_column(String(40), default="pending")
+    qty_ordered: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
+    qty_delivered: Mapped[Decimal] = mapped_column(Numeric(14, 3), default=0)
+    receiver_name: Mapped[str | None] = mapped_column(String(120))
+    pod_url: Mapped[str | None] = mapped_column(String(255))
+    fail_reason: Mapped[str | None] = mapped_column(String(80))
+    remarks: Mapped[str | None] = mapped_column(Text)
+    signature_url: Mapped[str | None] = mapped_column(String(255))
+    return_required: Mapped[bool] = mapped_column(Boolean, default=False)
+    reattempt_date: Mapped[date | None] = mapped_column(Date)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+    run: Mapped["LogisticsRun"] = relationship(back_populates="stops")
+
+
+class LogisticsException(Base):
+    __tablename__ = "logistics_exceptions"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    organization_id: Mapped[int] = mapped_column(ForeignKey("organizations.id"), nullable=False)
+    company_id: Mapped[int] = mapped_column(ForeignKey("companies.id"), nullable=False)
+    sales_order_id: Mapped[int | None] = mapped_column(ForeignKey("sales_orders.id"))
+    run_id: Mapped[int | None] = mapped_column(ForeignKey("logistics_runs.id"))
+    kind: Mapped[str] = mapped_column(String(40), nullable=False)
+    detail: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(40), default="open")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

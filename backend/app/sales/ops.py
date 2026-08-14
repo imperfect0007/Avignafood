@@ -1,4 +1,3 @@
-from datetime import datetime, timezone
 from decimal import Decimal
 
 from sqlalchemy.orm import Session, joinedload
@@ -14,8 +13,12 @@ from app.core.models import (
     SalesOrderStatus,
     StockBalance,
 )
-from app.core.schemas import OrderDeskLine, OrderDeskOut
+from app.core.schemas import OrderDeskLine, OrderDeskOut, OutstandingDeliveryOut
 from app.inventory.routes import _default_warehouse
+
+
+def qty_short(ordered: Decimal, available: Decimal) -> Decimal:
+    return max(Decimal("0"), Decimal(str(ordered or 0)) - Decimal(str(available or 0)))
 
 
 def on_hand(db: Session, warehouse_id: int, product_id: int) -> Decimal:
@@ -32,6 +35,9 @@ def line_stock(db: Session, warehouse_id: int, lines) -> list[OrderDeskLine]:
     for ln in lines:
         product = db.query(Product).filter(Product.id == ln.product_id).first()
         have = on_hand(db, warehouse_id, ln.product_id)
+        outstanding = getattr(ln, "outstanding_qty", None)
+        if outstanding is None:
+            outstanding = qty_short(ln.quantity, have)
         out.append(
             OrderDeskLine(
                 product_id=ln.product_id,
@@ -40,13 +46,14 @@ def line_stock(db: Session, warehouse_id: int, lines) -> list[OrderDeskLine]:
                 unit_price=ln.unit_price,
                 on_hand=have,
                 ok=have >= ln.quantity,
+                outstanding_qty=outstanding or Decimal("0"),
             )
         )
     return out
 
 
 def open_confirmed_from_quotation(db: Session, *, auth, quotation: Quotation) -> SalesOrder | None:
-    """After Super Admin/Owner approval (or at-floor quote), open a confirmed SO for Supervisor."""
+    """After quote approval, open a sales order for Superadmin to approve — not Supervisor yet."""
     existing = (
         db.query(SalesOrder)
         .filter(SalesOrder.quotation_id == quotation.id, SalesOrder.company_id == quotation.company_id)
@@ -63,19 +70,21 @@ def open_confirmed_from_quotation(db: Session, *, auth, quotation: Quotation) ->
         warehouse_id=warehouse.id,
         notes=quotation.notes,
         created_by_id=auth.user.id,
-        status=SalesOrderStatus.CONFIRMED,
-        confirmed_at=datetime.now(timezone.utc),
-        ops_status="pending_verify",
+        status=SalesOrderStatus.DRAFT,
+        ops_status="pending_approval",
     )
     db.add(so)
     db.flush()
     for ln in quotation.lines:
+        have = on_hand(db, warehouse.id, ln.product_id)
+        outstanding = qty_short(ln.quantity, have)
         db.add(
             SalesOrderLine(
                 sales_order_id=so.id,
                 product_id=ln.product_id,
                 quantity=ln.quantity,
                 unit_price=ln.unit_price,
+                outstanding_qty=outstanding,
             )
         )
     quotation.status  # leave caller to set CONVERTED if desired
@@ -105,7 +114,7 @@ def desk_out(db: Session, so: SalesOrder) -> OrderDeskOut:
         quotation_id=so.quotation_id,
         warehouse_id=so.warehouse_id,
         status=so.status.value if hasattr(so.status, "value") else str(so.status),
-        ops_status=so.ops_status or "pending_verify",
+        ops_status=so.ops_status or "pending_approval",
         notes=so.notes,
         confirmed_at=so.confirmed_at,
         created_at=so.created_at,
@@ -118,3 +127,73 @@ def desk_out(db: Session, so: SalesOrder) -> OrderDeskOut:
         slot=load.slot if load else None,
         vehicle=load.vehicle if load else None,
     )
+
+
+def apply_inbound_to_outstanding(db: Session, *, company_id: int, product_id: int, qty: Decimal) -> None:
+    remaining = Decimal(str(qty or 0))
+    if remaining <= 0:
+        return
+    lines = (
+        db.query(SalesOrderLine)
+        .join(SalesOrder, SalesOrder.id == SalesOrderLine.sales_order_id)
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.status.in_([SalesOrderStatus.CONFIRMED, SalesOrderStatus.INVOICED]),
+            SalesOrderLine.product_id == product_id,
+            SalesOrderLine.outstanding_qty > 0,
+        )
+        .order_by(SalesOrder.id.asc())
+        .all()
+    )
+    touched: set[int] = set()
+    for ln in lines:
+        if remaining <= 0:
+            break
+        have = ln.outstanding_qty or Decimal("0")
+        take = min(have, remaining)
+        ln.outstanding_qty = have - take
+        remaining -= take
+        touched.add(ln.sales_order_id)
+    for so_id in touched:
+        so = db.query(SalesOrder).options(joinedload(SalesOrder.lines)).filter(SalesOrder.id == so_id).first()
+        if so and all((x.outstanding_qty or Decimal("0")) <= 0 for x in so.lines):
+            if (so.ops_status or "") in ("shortage", "procuring", "pending_verify"):
+                so.ops_status = "ready"
+
+
+def outstanding_rows(db: Session, *, company_id: int, org_id: int) -> list[OutstandingDeliveryOut]:
+    rows = (
+        db.query(SalesOrder)
+        .options(joinedload(SalesOrder.lines))
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.organization_id == org_id,
+            SalesOrder.status.in_([SalesOrderStatus.CONFIRMED, SalesOrderStatus.INVOICED]),
+        )
+        .order_by(SalesOrder.id.desc())
+        .all()
+    )
+    out: list[OutstandingDeliveryOut] = []
+    for so in rows:
+        customer = db.query(Customer).filter(Customer.id == so.customer_id).first()
+        for ln in so.lines:
+            qty_out = ln.outstanding_qty or Decimal("0")
+            if qty_out <= 0:
+                continue
+            product = db.query(Product).filter(Product.id == ln.product_id).first()
+            have = on_hand(db, so.warehouse_id, ln.product_id)
+            out.append(
+                OutstandingDeliveryOut(
+                    order_id=so.id,
+                    customer_name=customer.name if customer else f"Customer #{so.customer_id}",
+                    product_id=ln.product_id,
+                    product_name=product.name if product else f"Product #{ln.product_id}",
+                    unit=product.unit if product else "KG",
+                    ordered_qty=ln.quantity,
+                    outstanding_qty=qty_out,
+                    on_hand=have,
+                    ops_status=so.ops_status or "shortage",
+                    can_complete=have >= qty_out,
+                )
+            )
+    return out

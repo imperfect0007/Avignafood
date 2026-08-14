@@ -20,6 +20,7 @@ from app.products.routes import router as products_router
 from app.purchases.routes import router as purchases_router
 from app.quotations.routes import router as quotations_router
 from app.sales.routes import router as sales_router
+from app.sales.ensure_schema import ensure_sales_schema
 from app.users.routes import router as users_router
 from app.deliveries.routes import router as deliveries_router
 from app.vehicles.routes import router as vehicles_router
@@ -29,6 +30,7 @@ import app.core.models  # noqa: F401 — register tables
 app = FastAPI(title="Avighnya Foods API", version="0.1.0")
 # ponytail: create missing tables without a migration tool
 Base.metadata.create_all(bind=engine)
+ensure_sales_schema(engine)
 
 app.add_middleware(
     CORSMiddleware,
