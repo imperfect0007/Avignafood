@@ -1,10 +1,11 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
+from app.accounts.routes import interest_loss, outstanding as inv_outstanding
 from app.audit.service import write_audit
 from app.core.database import get_db
 from app.core.deps import AuthContext, require_perms
@@ -19,7 +20,7 @@ from app.core.models import (
     SalesOrder,
     SalesOrderStatus,
 )
-from app.core.schemas import BillableLoadOut, ClientAccountOut, ClientLedgerOut, InvoiceOut
+from app.core.schemas import BillableLoadOut, BillableOrderOut, ClientAccountOut, ClientLedgerOut, InvoiceOut
 
 router = APIRouter(prefix="/invoices", tags=["invoices"])
 
@@ -27,13 +28,62 @@ router = APIRouter(prefix="/invoices", tags=["invoices"])
 NEAR_DISPATCH = ("Packed", "Ready", "Dispatched", "Delivered")
 
 
-def _out(inv: Invoice, customer: Customer | None = None) -> InvoiceOut:
-    outstanding = inv.total - inv.amount_paid
+def _gst_split(tax: Decimal) -> tuple[Decimal, Decimal, Decimal]:
+    half = (tax / 2).quantize(Decimal("0.01"))
+    return half, tax - half, Decimal("0")
+
+
+def _customer_outstanding(db: Session, company_id: int, customer_id: int) -> Decimal:
+    rows = (
+        db.query(Invoice)
+        .filter(
+            Invoice.company_id == company_id,
+            Invoice.customer_id == customer_id,
+            Invoice.status.in_((InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)),
+        )
+        .all()
+    )
+    return sum((inv_outstanding(i) for i in rows), Decimal("0"))
+
+
+def _product_names(db: Session, invoices: list[Invoice]) -> dict[int, str]:
+    pids = {ln.product_id for inv in invoices for ln in inv.lines}
+    if not pids:
+        return {}
+    return {p.id: p.name for p in db.query(Product).filter(Product.id.in_(pids)).all()}
+
+
+def _out(
+    inv: Invoice,
+    customer: Customer | None = None,
+    product_names: dict[int, str] | None = None,
+) -> InvoiceOut:
+    outstanding = inv_outstanding(inv)
     credit_days = None
     if inv.due_date and inv.invoice_date:
         credit_days = (inv.due_date - inv.invoice_date).days
     elif customer:
         credit_days = customer.credit_days
+    cgst, sgst, igst = _gst_split(inv.tax_amount or Decimal("0"))
+    delay = 0
+    days_to_due = 0
+    if inv.due_date:
+        delta = (inv.due_date - date.today()).days
+        if outstanding > 0 and delta < 0:
+            delay = -delta
+        elif delta > 0:
+            days_to_due = delta
+    if inv.status == InvoiceStatus.CANCELLED:
+        pay_status = "cancelled"
+    elif inv.status == InvoiceStatus.PAID or outstanding <= 0:
+        pay_status = "paid"
+    elif delay > 0:
+        pay_status = "overdue"
+    elif inv.status == InvoiceStatus.PARTIAL or (inv.amount_paid or 0) > 0:
+        pay_status = "partial"
+    else:
+        pay_status = "unpaid"
+    names = product_names or {}
     return InvoiceOut(
         id=inv.id,
         company_id=inv.company_id,
@@ -51,10 +101,28 @@ def _out(inv: Invoice, customer: Customer | None = None) -> InvoiceOut:
         amount_paid=inv.amount_paid,
         outstanding=outstanding,
         credit_days=credit_days,
+        credit_applied=getattr(inv, "credit_applied", None) or 0,
+        debit_applied=getattr(inv, "debit_applied", None) or 0,
+        cgst=cgst,
+        sgst=sgst,
+        igst=igst,
+        delay_days=delay,
+        days_to_due=days_to_due,
+        payment_status=pay_status,
+        interest_loss=interest_loss(inv),
+        penalty_waived=bool(getattr(inv, "penalty_waived", False)),
+        sent_at=getattr(inv, "sent_at", None),
+        sent_via=getattr(inv, "sent_via", None),
+        gstin=customer.gstin if customer else None,
+        phone=customer.phone if customer else None,
+        address=customer.address if customer else None,
+        billing_address=(customer.billing_address or customer.address) if customer else None,
+        shipping_address=(customer.shipping_address or customer.address) if customer else None,
         lines=[
             {
                 "id": ln.id,
                 "product_id": ln.product_id,
+                "product_name": names.get(ln.product_id) or f"Item {ln.product_id}",
                 "quantity": float(ln.quantity),
                 "unit_price": float(ln.unit_price),
                 "gst_rate": float(ln.gst_rate),
@@ -127,7 +195,8 @@ def list_invoices(
         c.id: c
         for c in db.query(Customer).filter(Customer.company_id == company_id).all()
     }
-    return [_out(r, customers.get(r.customer_id)) for r in rows]
+    names = _product_names(db, rows)
+    return [_out(r, customers.get(r.customer_id), names) for r in rows]
 
 
 def _invoiced_dispatch_ids(db: Session, company_id: int) -> set[int]:
@@ -203,6 +272,94 @@ def billable_loads(
     return [n for n in _list_notices(db, company_id, auth.organization_id) if n.can_invoice]
 
 
+@router.get("/billable-orders", response_model=list[BillableOrderOut])
+def billable_orders(
+    auth: AuthContext = Depends(require_perms("invoices.view")),
+    db: Session = Depends(get_db),
+):
+    """Sales orders Super Admin approved that Accounts can invoice. Invoice is raised before dispatch."""
+    company_id = auth.require_company()
+    invoiced = {
+        r[0]
+        for r in db.query(Invoice.sales_order_id)
+        .filter(Invoice.company_id == company_id, Invoice.sales_order_id.isnot(None))
+        .all()
+        if r[0]
+    }
+    rows = (
+        db.query(SalesOrder)
+        .options(joinedload(SalesOrder.lines))
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.status == SalesOrderStatus.CONFIRMED,
+        )
+        .order_by(SalesOrder.id.desc())
+        .all()
+    )
+    out: list[BillableOrderOut] = []
+    for so in rows:
+        if so.id in invoiced:
+            continue
+        customer = db.query(Customer).filter(Customer.id == so.customer_id).first()
+        qty = sum((ln.quantity for ln in so.lines), Decimal("0"))
+        sub = Decimal("0")
+        tax = Decimal("0")
+        for ln in so.lines:
+            product = db.query(Product).filter(Product.id == ln.product_id).first()
+            gst = product.gst_rate if product else Decimal("0")
+            line_sub = ln.quantity * ln.unit_price
+            sub += line_sub
+            tax += line_sub * gst / Decimal("100")
+        est = sub + tax
+        due = _customer_outstanding(db, company_id, so.customer_id)
+        limit = (customer.credit_limit if customer else Decimal("0")) or Decimal("0")
+        projected = due + est
+        out.append(
+            BillableOrderOut(
+                sales_order_id=so.id,
+                customer_id=so.customer_id,
+                customer_name=customer.name if customer else f"Customer {so.customer_id}",
+                address=(customer.shipping_address or customer.address) if customer else None,
+                ops_status=so.ops_status,
+                logistics_status=None,
+                vehicle=None,
+                line_count=len(so.lines),
+                qty=qty,
+                estimated_total=est,
+                credit_limit=limit,
+                current_outstanding=due,
+                projected_exposure=projected,
+                credit_ok=(limit <= 0) or (projected <= limit),
+            )
+        )
+    return out
+
+
+@router.post("/{invoice_id}/send", response_model=InvoiceOut)
+def send_invoice(
+    invoice_id: int,
+    via: str = Query("whatsapp"),
+    auth: AuthContext = Depends(require_perms("invoices.create")),
+    db: Session = Depends(get_db),
+):
+    company_id = auth.require_company()
+    if via not in ("whatsapp", "email"):
+        raise HTTPException(status_code=400, detail="Use whatsapp or email")
+    inv = (
+        db.query(Invoice)
+        .options(joinedload(Invoice.lines))
+        .filter(Invoice.id == invoice_id, Invoice.company_id == company_id)
+        .first()
+    )
+    if not inv:
+        raise HTTPException(status_code=404, detail="Invoice not found")
+    inv.sent_at = datetime.now(timezone.utc)
+    inv.sent_via = via
+    db.commit()
+    customer = db.query(Customer).filter(Customer.id == inv.customer_id).first()
+    return _out(inv, customer, _product_names(db, [inv]))
+
+
 @router.post("/from-dispatch/{dispatch_id}", response_model=InvoiceOut)
 def invoice_from_dispatch(
     dispatch_id: int,
@@ -229,6 +386,15 @@ def invoice_from_dispatch(
     existing = db.query(Invoice).filter(Invoice.dispatch_id == load.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Invoice already exists for this load")
+
+    if load.sales_order_id:
+        so = db.query(SalesOrder).filter(SalesOrder.id == load.sales_order_id, SalesOrder.company_id == company_id).first()
+        if so:
+            existing_so_inv = db.query(Invoice).filter(Invoice.sales_order_id == so.id).first()
+            if existing_so_inv:
+                raise HTTPException(status_code=400, detail="Invoice already exists for this order")
+            if so.status == SalesOrderStatus.CONFIRMED:
+                return invoice_from_order(load.sales_order_id, auth, db, override_credit=True)
 
     company = db.query(Company).filter(Company.id == company_id).first()
     customer = db.query(Customer).filter(Customer.id == load.customer_id).first()
@@ -303,7 +469,7 @@ def invoice_from_dispatch(
     )
     db.commit()
     inv = db.query(Invoice).options(joinedload(Invoice.lines)).filter(Invoice.id == inv.id).first()
-    return _out(inv, customer)
+    return _out(inv, customer, _product_names(db, [inv]) if inv else None)
 
 
 @router.get("/clients", response_model=list[ClientAccountOut])
@@ -342,7 +508,21 @@ def list_client_accounts(
     for c in customers:
         rows = inv_by_cust.get(c.id, [])
         revenue = sum((i.total for i in rows), Decimal("0"))
-        outstanding = sum((i.total - i.amount_paid for i in rows if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)), Decimal("0"))
+        outstanding = sum(
+            (inv_outstanding(i) for i in rows if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)),
+            Decimal("0"),
+        )
+        paid = sum((i.amount_paid or Decimal("0") for i in rows), Decimal("0"))
+        overdue = sum(
+            (
+                inv_outstanding(i)
+                for i in rows
+                if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)
+                and i.due_date
+                and i.due_date < date.today()
+            ),
+            Decimal("0"),
+        )
         out.append(
             ClientAccountOut(
                 customer_id=c.id,
@@ -355,6 +535,8 @@ def list_client_accounts(
                 invoice_count=len(rows),
                 total_revenue=revenue,
                 outstanding=outstanding,
+                paid=paid,
+                overdue=overdue,
             )
         )
     return out
@@ -400,9 +582,19 @@ def client_ledger(
     )
     revenue = sum((i.total for i in invs), Decimal("0"))
     outstanding = sum(
-        (i.total - i.amount_paid for i in invs if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)),
+        (inv_outstanding(i) for i in invs if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL)),
         Decimal("0"),
     )
+    paid = sum((i.amount_paid or Decimal("0") for i in invs), Decimal("0"))
+    overdue = sum(
+        (
+            inv_outstanding(i)
+            for i in invs
+            if i.status in (InvoiceStatus.OPEN, InvoiceStatus.PARTIAL) and i.due_date and i.due_date < date.today()
+        ),
+        Decimal("0"),
+    )
+    names = _product_names(db, invs)
     return ClientLedgerOut(
         customer_id=customer.id,
         name=customer.name,
@@ -415,7 +607,9 @@ def client_ledger(
         invoice_count=len(invs),
         total_revenue=revenue,
         outstanding=outstanding,
-        invoices=[_out(i, customer) for i in invs],
+        paid=paid,
+        overdue=overdue,
+        invoices=[_out(i, customer, names) for i in invs],
     )
 
 
@@ -424,6 +618,7 @@ def invoice_from_order(
     order_id: int,
     auth: AuthContext = Depends(require_perms("invoices.create")),
     db: Session = Depends(get_db),
+    override_credit: bool = Query(False),
 ):
     company_id = auth.require_company()
     so = (
@@ -439,13 +634,35 @@ def invoice_from_order(
     if not so:
         raise HTTPException(status_code=404, detail="Sales order not found")
     if so.status != SalesOrderStatus.CONFIRMED:
-        raise HTTPException(status_code=400, detail="Order must be confirmed before invoicing")
+        raise HTTPException(status_code=400, detail="Super Admin must approve the order before invoicing")
     existing = db.query(Invoice).filter(Invoice.sales_order_id == so.id).first()
     if existing:
         raise HTTPException(status_code=400, detail="Invoice already exists for this order")
 
     company = db.query(Company).filter(Company.id == company_id).first()
     customer = db.query(Customer).filter(Customer.id == so.customer_id).first()
+
+    subtotal = Decimal("0")
+    tax_amount = Decimal("0")
+    priced: list[tuple] = []
+    for ln in so.lines:
+        product = db.query(Product).filter(Product.id == ln.product_id).first()
+        gst_rate = (product.gst_rate if product else Decimal("0")) or Decimal("0")
+        line_sub = ln.quantity * ln.unit_price
+        line_tax = line_sub * gst_rate / Decimal("100")
+        subtotal += line_sub
+        tax_amount += line_tax
+        priced.append((ln, gst_rate, line_sub, line_tax))
+
+    due = _customer_outstanding(db, company_id, so.customer_id)
+    limit = (customer.credit_limit if customer else Decimal("0")) or Decimal("0")
+    projected = due + subtotal + tax_amount
+    if limit > 0 and projected > limit and not override_credit:
+        raise HTTPException(
+            status_code=400,
+            detail=f"CREDIT LIMIT EXCEEDED: outstanding {due} + invoice {subtotal + tax_amount} = {projected} over limit {limit}",
+        )
+
     inv = Invoice(
         organization_id=auth.organization_id,
         company_id=company_id,
@@ -459,15 +676,7 @@ def invoice_from_order(
     db.add(inv)
     db.flush()
 
-    subtotal = Decimal("0")
-    tax_amount = Decimal("0")
-    for ln in so.lines:
-        product = db.query(Product).filter(Product.id == ln.product_id).first()
-        gst_rate = product.gst_rate if product else Decimal("0")
-        line_sub = ln.quantity * ln.unit_price
-        line_tax = line_sub * gst_rate / Decimal("100")
-        subtotal += line_sub
-        tax_amount += line_tax
+    for ln, gst_rate, line_sub, line_tax in priced:
         db.add(
             InvoiceLine(
                 invoice_id=inv.id,
@@ -483,6 +692,8 @@ def invoice_from_order(
     inv.tax_amount = tax_amount
     inv.total = subtotal + tax_amount
     so.status = SalesOrderStatus.INVOICED
+    if (so.ops_status or "") not in ("allocated", "dispatched", "ready", "shortage", "procuring"):
+        so.ops_status = "pending_verify"
     write_audit(
         db,
         action="create",
@@ -495,7 +706,7 @@ def invoice_from_order(
     )
     db.commit()
     inv = db.query(Invoice).options(joinedload(Invoice.lines)).filter(Invoice.id == inv.id).first()
-    return _out(inv, customer)
+    return _out(inv, customer, _product_names(db, [inv]) if inv else None)
 
 
 @router.get("/{invoice_id}", response_model=InvoiceOut)
@@ -518,4 +729,4 @@ def get_invoice(
     if not inv:
         raise HTTPException(status_code=404, detail="Invoice not found")
     customer = db.query(Customer).filter(Customer.id == inv.customer_id).first()
-    return _out(inv, customer)
+    return _out(inv, customer, _product_names(db, [inv]))

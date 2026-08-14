@@ -4,16 +4,18 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.audit.service import write_audit
-from app.core.database import get_db
+from app.core.database import engine, get_db
 from app.core.deps import AuthContext, require_owner, require_perms
-from app.core.models import Product, Quotation, QuotationLine, QuotationStatus
+from app.core.models import Customer, Lead, LeadStatus, Product, Quotation, QuotationLine, QuotationStatus
 from app.core.schemas import QuotationCreate, QuotationOut
+from app.sales.ensure_schema import ensure_sales_schema
 from app.sales.ops import open_confirmed_from_quotation
 
 router = APIRouter(prefix="/quotations", tags=["quotations"])
 
 
-def _out(q: Quotation) -> QuotationOut:
+def _out(q: Quotation, customer_name: str | None = None) -> QuotationOut:
+    below = any(float(ln.unit_price) < float(ln.base_price) for ln in q.lines)
     return QuotationOut(
         id=q.id,
         company_id=q.company_id,
@@ -31,6 +33,9 @@ def _out(q: Quotation) -> QuotationOut:
             }
             for ln in q.lines
         ],
+        customer_name=customer_name,
+        below_floor=below,
+        needs_approval=q.status == QuotationStatus.PENDING_APPROVAL,
     )
 
 
@@ -47,7 +52,11 @@ def list_quotations(
         .order_by(Quotation.id.desc())
         .all()
     )
-    return [_out(r) for r in rows]
+    names = {
+        c.id: c.name
+        for c in db.query(Customer).filter(Customer.id.in_({r.customer_id for r in rows} or {0})).all()
+    }
+    return [_out(r, names.get(r.customer_id)) for r in rows]
 
 
 @router.post("", response_model=QuotationOut)
@@ -57,15 +66,51 @@ def create_quotation(
     db: Session = Depends(get_db),
 ):
     company_id = auth.require_company()
+    ensure_sales_schema(engine)
     if not body.lines:
         raise HTTPException(status_code=400, detail="At least one line required")
+    if not body.customer_id and not body.lead_id:
+        raise HTTPException(status_code=400, detail="Pick a customer or a lead")
+
+    customer_id = body.customer_id
+    lead_id = body.lead_id
+    if lead_id:
+        lead = (
+            db.query(Lead)
+            .filter(Lead.id == lead_id, Lead.company_id == company_id, Lead.organization_id == auth.organization_id)
+            .first()
+        )
+        if not lead:
+            raise HTTPException(status_code=404, detail="Lead not found")
+        if not customer_id:
+            customer_id = lead.customer_id
+        if not customer_id:
+            customer = Customer(
+                organization_id=auth.organization_id,
+                company_id=company_id,
+                name=lead.business_name,
+                legal_name=lead.business_name,
+                trade_name=lead.business_name,
+                contact_person=lead.contact_person,
+                phone=lead.phone,
+                email=lead.email,
+                gstin=getattr(lead, "gstin", None),
+                address=lead.location,
+                customer_type=lead.lead_type,
+            )
+            db.add(customer)
+            db.flush()
+            lead.customer_id = customer.id
+            customer_id = customer.id
+        if lead.status not in (LeadStatus.WON, LeadStatus.LOST, LeadStatus.NEGOTIATION):
+            lead.status = LeadStatus.QUOTATION
 
     needs_approval = False
     q = Quotation(
         organization_id=auth.organization_id,
         company_id=company_id,
-        customer_id=body.customer_id,
-        lead_id=body.lead_id,
+        customer_id=customer_id,
+        lead_id=lead_id,
         notes=body.notes,
         created_by_id=auth.user.id,
         status=QuotationStatus.DRAFT,

@@ -62,11 +62,23 @@ def create_vehicle(
     auth: AuthContext = Depends(require_perms("vehicles.edit")),
     db: Session = Depends(get_db),
 ):
+    name = body.name.strip()
+    plate = body.plate.strip().upper()
+    if not name or not plate:
+        raise HTTPException(status_code=400, detail="Enter vehicle name and number")
+    exists = (
+        db.query(Vehicle)
+        .filter(Vehicle.organization_id == auth.organization_id, Vehicle.plate == plate)
+        .first()
+    )
+    if exists:
+        raise HTTPException(status_code=400, detail="That vehicle number is already in the fleet")
     v = Vehicle(
         organization_id=auth.organization_id,
-        name=body.name.strip(),
-        plate=body.plate.strip().upper(),
+        name=name,
+        plate=plate,
         kind=body.kind or "truck",
+        driver_name=(body.driver_name or "").strip() or None,
     )
     db.add(v)
     db.commit()

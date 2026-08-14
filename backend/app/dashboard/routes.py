@@ -1,14 +1,16 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
-from app.core.database import get_db
+from app.core.database import engine, get_db
 from app.core.deps import AuthContext, require_perms
+from app.accounts.routes import interest_loss, outstanding as inv_outstanding
 from app.core.models import (
     Customer,
+    FieldVisit,
     Invoice,
     InvoiceStatus,
     Lead,
@@ -16,12 +18,16 @@ from app.core.models import (
     Payment,
     Product,
     Quotation,
+    QuotationLine,
     QuotationStatus,
     SalesOrder,
     SalesOrderStatus,
     StockBalance,
     UserCompany,
     Warehouse,
+    LogisticsRun,
+    LogisticsStop,
+    LogisticsException,
 )
 from app.core.schemas import (
     AccountsDashboardOut,
@@ -73,7 +79,7 @@ def accounts_dashboard(
     overdue_count = 0
 
     for inv in open_invoices:
-        bal = inv.total - inv.amount_paid
+        bal = inv_outstanding(inv)
         if bal <= 0:
             continue
         total_receivables += bal
@@ -102,6 +108,83 @@ def accounts_dashboard(
         .scalar()
     )
 
+    invoice_count = (
+        db.query(func.count(Invoice.id))
+        .filter(Invoice.company_id == company_id, Invoice.status != InvoiceStatus.CANCELLED)
+        .scalar()
+        or 0
+    )
+    today_invoices = (
+        db.query(func.count(Invoice.id))
+        .filter(
+            Invoice.company_id == company_id,
+            Invoice.invoice_date == today,
+            Invoice.status != InvoiceStatus.CANCELLED,
+        )
+        .scalar()
+        or 0
+    )
+    today_billing = (
+        db.query(func.coalesce(func.sum(Invoice.total), 0))
+        .filter(
+            Invoice.company_id == company_id,
+            Invoice.invoice_date == today,
+            Invoice.status != InvoiceStatus.CANCELLED,
+        )
+        .scalar()
+    )
+    invoiced_so = {
+        r[0]
+        for r in db.query(Invoice.sales_order_id)
+        .filter(Invoice.company_id == company_id, Invoice.sales_order_id.isnot(None))
+        .all()
+        if r[0]
+    }
+    ready_to_invoice = (
+        db.query(func.count(SalesOrder.id))
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.status == SalesOrderStatus.CONFIRMED,
+        )
+        .scalar()
+        or 0
+    )
+    if invoiced_so:
+        billed = (
+            db.query(func.count(SalesOrder.id))
+            .filter(SalesOrder.id.in_(invoiced_so), SalesOrder.company_id == company_id)
+            .scalar()
+            or 0
+        )
+        ready_to_invoice = max(0, int(ready_to_invoice) - int(billed))
+
+    credit_alerts = 0
+    aging_current = aging_d1_30 = aging_d31_60 = aging_d61_90 = aging_d90_plus = Decimal("0")
+    cost_delay = Decimal("0")
+    by_cust: dict[int, Decimal] = {}
+    for inv in open_invoices:
+        bal = inv_outstanding(inv)
+        by_cust[inv.customer_id] = by_cust.get(inv.customer_id, Decimal("0")) + bal
+        days = 0
+        if inv.due_date:
+            days = max(0, (today - inv.due_date).days)
+        if days <= 0:
+            aging_current += bal
+        elif days <= 30:
+            aging_d1_30 += bal
+        elif days <= 60:
+            aging_d31_60 += bal
+        elif days <= 90:
+            aging_d61_90 += bal
+        else:
+            aging_d90_plus += bal
+        cost_delay += interest_loss(inv)
+    for c in db.query(Customer).filter(Customer.company_id == company_id, Customer.is_active.is_(True)):
+        due = by_cust.get(c.id, Decimal("0"))
+        limit = c.credit_limit or Decimal("0")
+        if limit > 0 and due > limit:
+            credit_alerts += 1
+
     return AccountsDashboardOut(
         today_collections=Decimal(str(today_collections)),
         month_collections=Decimal(str(month_collections)),
@@ -114,6 +197,19 @@ def accounts_dashboard(
         overdue_invoices=overdue_count,
         credit_exposure=Decimal(str(credit_exposure)),
         active_customers=int(active_customers or 0),
+        invoice_count=int(invoice_count),
+        pending_payments=unpaid + partial,
+        credit_alerts=credit_alerts,
+        today_invoices=int(today_invoices),
+        today_billing=Decimal(str(today_billing or 0)),
+        due_soon=due_this_week,
+        cost_of_delay=cost_delay,
+        aging_current=aging_current,
+        aging_d1_30=aging_d1_30,
+        aging_d31_60=aging_d31_60,
+        aging_d61_90=aging_d61_90,
+        aging_d90_plus=aging_d90_plus,
+        ready_to_invoice=int(ready_to_invoice),
     )
 
 
@@ -162,14 +258,26 @@ def supervisor_dashboard(
         )
         .scalar()
     )
-    pending_approvals = (
+    pending_quotes = (
         db.query(func.count(Quotation.id))
         .filter(
             Quotation.company_id == company_id,
             Quotation.status == QuotationStatus.PENDING_APPROVAL,
         )
         .scalar()
+        or 0
     )
+    pending_order_approvals = (
+        db.query(func.count(SalesOrder.id))
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.status == SalesOrderStatus.DRAFT,
+            SalesOrder.ops_status == "pending_approval",
+        )
+        .scalar()
+        or 0
+    )
+    pending_approvals = int(pending_quotes) + int(pending_order_approvals)
     pending_orders = (
         db.query(func.count(SalesOrder.id))
         .filter(SalesOrder.company_id == company_id, SalesOrder.status == SalesOrderStatus.DRAFT)
@@ -177,7 +285,7 @@ def supervisor_dashboard(
     )
     confirmed_orders = (
         db.query(func.count(SalesOrder.id))
-        .filter(SalesOrder.company_id == company_id, SalesOrder.status == SalesOrderStatus.CONFIRMED)
+        .filter(SalesOrder.company_id == company_id, SalesOrder.status == SalesOrderStatus.INVOICED)
         .scalar()
         or 0
     )
@@ -261,6 +369,9 @@ def sales_dashboard(
     db: Session = Depends(get_db),
 ):
     """Personal sales dashboard — own leads, quotes, orders, achievement."""
+    from app.sales.ensure_schema import ensure_sales_schema
+
+    ensure_sales_schema(engine)
     company_id = auth.require_company()
     uid = auth.user.id
     today = date.today()
@@ -311,7 +422,7 @@ def sales_dashboard(
         .filter(
             SalesOrder.company_id == company_id,
             SalesOrder.created_by_id == uid,
-            SalesOrder.status.in_([SalesOrderStatus.DRAFT, SalesOrderStatus.CONFIRMED]),
+            SalesOrder.status.in_([SalesOrderStatus.DRAFT, SalesOrderStatus.CONFIRMED, SalesOrderStatus.INVOICED]),
         )
         .scalar()
     )
@@ -360,6 +471,85 @@ def sales_dashboard(
     if month_target > 0:
         achievement = (month_sales_d * Decimal("100") / month_target).quantize(Decimal("0.1"))
 
+    funnel: dict[str, int] = {}
+    for st in LeadStatus:
+        funnel[st.value] = int(
+            db.query(func.count(Lead.id))
+            .filter(Lead.company_id == company_id, Lead.assigned_to_id == uid, Lead.status == st)
+            .scalar()
+            or 0
+        )
+
+    today_visits = (
+        db.query(func.count(FieldVisit.id))
+        .filter(
+            FieldVisit.company_id == company_id,
+            FieldVisit.user_id == uid,
+            func.date(FieldVisit.checked_in_at) == today,
+        )
+        .scalar()
+        or 0
+    )
+    now = datetime.now(timezone.utc)
+    overdue_follow = (
+        db.query(func.count(Lead.id))
+        .filter(
+            Lead.company_id == company_id,
+            Lead.assigned_to_id == uid,
+            Lead.status.notin_([LeadStatus.WON, LeadStatus.LOST]),
+            Lead.next_follow_up.isnot(None),
+            Lead.next_follow_up < now,
+        )
+        .scalar()
+        or 0
+    )
+    won_quotes = (
+        db.query(func.count(Quotation.id))
+        .filter(
+            Quotation.company_id == company_id,
+            Quotation.created_by_id == uid,
+            Quotation.status.in_([QuotationStatus.ACCEPTED, QuotationStatus.CONVERTED]),
+        )
+        .scalar()
+        or 0
+    )
+    lost_quotes = (
+        db.query(func.count(Quotation.id))
+        .filter(
+            Quotation.company_id == company_id,
+            Quotation.created_by_id == uid,
+            Quotation.status == QuotationStatus.REJECTED,
+        )
+        .scalar()
+        or 0
+    )
+    quote_closed = won_quotes + lost_quotes
+    quote_win = Decimal("0")
+    if quote_closed:
+        quote_win = (Decimal(won_quotes) * Decimal("100") / Decimal(quote_closed)).quantize(Decimal("0.1"))
+    price_exceptions = (
+        db.query(func.count(func.distinct(QuotationLine.quotation_id)))
+        .join(Quotation, QuotationLine.quotation_id == Quotation.id)
+        .filter(
+            Quotation.company_id == company_id,
+            Quotation.created_by_id == uid,
+            QuotationLine.unit_price < QuotationLine.base_price,
+        )
+        .scalar()
+        or 0
+    )
+    visit_coverage = (
+        db.query(func.count(func.distinct(FieldVisit.customer_id)))
+        .filter(
+            FieldVisit.company_id == company_id,
+            FieldVisit.user_id == uid,
+            FieldVisit.checked_in_at >= datetime.combine(month_start, datetime.min.time()).replace(tzinfo=timezone.utc),
+            FieldVisit.customer_id.isnot(None),
+        )
+        .scalar()
+        or 0
+    )
+
     return SalesDashboardOut(
         active_leads=int(active_leads or 0),
         new_leads=int(new_leads or 0),
@@ -371,6 +561,13 @@ def sales_dashboard(
         achievement_pct=achievement,
         my_customers=int(my_customers or 0),
         conversion_rate=conversion,
+        funnel=funnel,
+        today_visits=int(today_visits),
+        overdue_follow_ups=int(overdue_follow),
+        pending_quotes=int(pending_quotations or 0),
+        quote_win_rate=quote_win,
+        price_exceptions=int(price_exceptions),
+        visit_coverage=int(visit_coverage),
     )
 
 
@@ -379,32 +576,81 @@ def logistics_dashboard(
     auth: AuthContext = Depends(require_perms("dashboard.view")),
     db: Session = Depends(get_db),
 ):
-    """Dispatch queue from confirmed orders. Vehicle/POD zeros until dispatch master exists."""
     company_id = auth.require_company()
     today = date.today()
-
-    # ponytail: no Dispatch/Vehicle tables yet — confirmed SO = ready queue; invoiced today ≈ delivered
-    confirmed = (
+    ready = (
         db.query(func.count(SalesOrder.id))
-        .filter(SalesOrder.company_id == company_id, SalesOrder.status == SalesOrderStatus.CONFIRMED)
+        .filter(SalesOrder.company_id == company_id, SalesOrder.ops_status == "ready")
+        .scalar()
+        or 0
+    )
+    planned = (
+        db.query(func.count(LogisticsRun.id))
+        .filter(LogisticsRun.company_id == company_id, LogisticsRun.status.in_(("planned", "loading", "loaded")))
+        .scalar()
+        or 0
+    )
+    in_transit = (
+        db.query(func.count(LogisticsRun.id))
+        .filter(LogisticsRun.company_id == company_id, LogisticsRun.status == "in_transit")
+        .scalar()
+        or 0
+    )
+    ofd = (
+        db.query(func.count(LogisticsRun.id))
+        .filter(LogisticsRun.company_id == company_id, LogisticsRun.status == "out_for_delivery")
+        .scalar()
+        or 0
+    )
+    today_disp = (
+        db.query(func.count(LogisticsRun.id))
+        .filter(LogisticsRun.company_id == company_id, LogisticsRun.on_date == today)
         .scalar()
         or 0
     )
     delivered_today = (
-        db.query(func.count(Invoice.id))
+        db.query(func.count(LogisticsStop.id))
+        .join(LogisticsRun, LogisticsRun.id == LogisticsStop.run_id)
         .filter(
-            Invoice.company_id == company_id,
-            Invoice.invoice_date == today,
-            Invoice.status != InvoiceStatus.CANCELLED,
+            LogisticsRun.company_id == company_id,
+            LogisticsStop.status == "delivered",
+            func.date(LogisticsStop.delivered_at) == today,
         )
         .scalar()
         or 0
     )
-
+    pending_pod = (
+        db.query(func.count(LogisticsStop.id))
+        .join(LogisticsRun, LogisticsRun.id == LogisticsStop.run_id)
+        .filter(
+            LogisticsRun.company_id == company_id,
+            LogisticsStop.status.in_(("delivered", "partial")),
+            or_(LogisticsStop.pod_url.is_(None), LogisticsStop.pod_url == ""),
+        )
+        .scalar()
+        or 0
+    )
+    issues = (
+        db.query(func.count(LogisticsException.id))
+        .filter(LogisticsException.company_id == company_id, LogisticsException.status == "open")
+        .scalar()
+        or 0
+    )
+    confirmed = (
+        db.query(func.count(SalesOrder.id))
+        .filter(SalesOrder.company_id == company_id, SalesOrder.status == SalesOrderStatus.INVOICED)
+        .scalar()
+        or 0
+    )
     return LogisticsDashboardOut(
-        pending_dispatches=int(confirmed),
-        ready_for_dispatch=int(confirmed),
-        today_dispatches=int(delivered_today),
+        pending_dispatches=int(planned),
+        ready_for_dispatch=int(ready),
+        today_dispatches=int(today_disp),
         delivered_today=int(delivered_today),
         confirmed_orders=int(confirmed),
+        planned=int(planned),
+        in_transit=int(in_transit),
+        out_for_delivery=int(ofd),
+        pending_pod=int(pending_pod),
+        issues=int(issues),
     )

@@ -1,4 +1,4 @@
-from datetime import date, datetime, timezone
+from datetime import datetime, timezone
 from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
@@ -7,23 +7,18 @@ from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from sqlalchemy.orm import Session, joinedload
 
 from app.audit.service import write_audit
-from app.core.database import get_db
+from app.core.database import engine, get_db
 from app.core.deps import AuthContext, require_perms
 from app.core.models import (
     Customer,
-    Delivery,
     FieldVisit,
     FieldVisitMedia,
     Lead,
     LeadStatus,
     RoleName,
-    SalesOrder,
-    SalesOrderStatus,
-    Vehicle,
-    VehicleSlot,
 )
 from app.core.schemas import VisitCreate, VisitOut
-from app.inventory.routes import _default_warehouse
+from app.sales.ensure_schema import ensure_sales_schema
 
 router = APIRouter(prefix="/visits", tags=["visits"])
 
@@ -71,6 +66,7 @@ def list_visits(
     auth: AuthContext = Depends(require_perms("visits.view")),
     db: Session = Depends(get_db),
 ):
+    ensure_sales_schema(engine)
     q = (
         db.query(FieldVisit)
         .options(joinedload(FieldVisit.media))
@@ -89,6 +85,7 @@ def create_visit(
     auth: AuthContext = Depends(require_perms("visits.create")),
     db: Session = Depends(get_db),
 ):
+    ensure_sales_schema(engine)
     if not _can_use_company(auth, body.company_id):
         raise HTTPException(status_code=403, detail="No access to this company")
 
@@ -96,126 +93,91 @@ def create_visit(
     if kind not in ("existing", "new"):
         raise HTTPException(status_code=400, detail="Pick existing client or new client")
 
+    allowed_purpose = {"prospecting", "new_order", "follow-up", "collection", "complaint", "delivery_support"}
+    purpose = (body.purpose or "follow-up").strip().lower().replace(" ", "-").replace("_", "-")
+    if purpose == "delivery-support":
+        purpose = "delivery_support"
+    if purpose == "new-order":
+        purpose = "new_order"
+    if purpose not in allowed_purpose:
+        raise HTTPException(status_code=400, detail="Invalid visit purpose")
+
     customer: Customer | None = None
-    lead_id = None
-    sales_order_id = None
+    lead_id = body.lead_id
     site_name = body.site_name.strip()
     contact = body.contact_person
     phone = body.phone
 
     if kind == "existing":
-        if not body.customer_id:
-            raise HTTPException(status_code=400, detail="Select an existing client")
-        customer = (
-            db.query(Customer)
-            .filter(
-                Customer.id == body.customer_id,
-                Customer.company_id == body.company_id,
-                Customer.organization_id == auth.organization_id,
-            )
-            .first()
-        )
-        if not customer:
-            raise HTTPException(status_code=404, detail="Client not found")
-        site_name = customer.name
-        contact = contact or customer.contact_person
-        phone = phone or customer.phone
-        warehouse = _default_warehouse(db, body.company_id, auth.organization_id)
-        so = SalesOrder(
-            organization_id=auth.organization_id,
-            company_id=body.company_id,
-            customer_id=customer.id,
-            warehouse_id=warehouse.id,
-            notes=body.notes or body.voice_url,
-            created_by_id=auth.user.id,
-            status=SalesOrderStatus.DRAFT,
-        )
-        db.add(so)
-        db.flush()
-        sales_order_id = so.id
-        truck = (
-            db.query(Vehicle)
-            .filter(Vehicle.organization_id == auth.organization_id, Vehicle.is_active.is_(True))
-            .order_by(Vehicle.id)
-            .first()
-        )
-        slot = "morning"
-        if truck:
-            taken = {
-                r.slot
-                for r in db.query(VehicleSlot).filter(
-                    VehicleSlot.vehicle_id == truck.id,
-                    VehicleSlot.on_date == date.today(),
-                    VehicleSlot.status == "booked",
-                ).all()
-            }
-            for name in ("morning", "afternoon", "evening"):
-                if name not in taken:
-                    slot = name
-                    break
-            else:
-                slot = "evening"
-            row = (
-                db.query(VehicleSlot)
-                .filter(VehicleSlot.vehicle_id == truck.id, VehicleSlot.on_date == date.today(), VehicleSlot.slot == slot)
+        if body.customer_id:
+            customer = (
+                db.query(Customer)
+                .filter(
+                    Customer.id == body.customer_id,
+                    Customer.company_id == body.company_id,
+                    Customer.organization_id == auth.organization_id,
+                )
                 .first()
             )
-            if row:
-                row.status = "booked"
-            else:
-                db.add(VehicleSlot(vehicle_id=truck.id, on_date=date.today(), slot=slot, status="booked"))
-        db.add(
-            Delivery(
-                organization_id=auth.organization_id,
-                company_id=body.company_id,
-                customer_id=customer.id,
-                vehicle_id=truck.id if truck else None,
-                item_summary="Order from field visit",
-                slot_date=date.today(),
-                slot=slot,
-                status="pending",
+            if not customer:
+                raise HTTPException(status_code=404, detail="Client not found")
+            site_name = customer.name
+            contact = contact or customer.contact_person
+            phone = phone or customer.phone
+        elif body.lead_id:
+            lead = (
+                db.query(Lead)
+                .filter(
+                    Lead.id == body.lead_id,
+                    Lead.company_id == body.company_id,
+                    Lead.organization_id == auth.organization_id,
+                )
+                .first()
             )
-        )
+            if not lead:
+                raise HTTPException(status_code=404, detail="Lead not found")
+            lead_id = lead.id
+            site_name = lead.business_name
+            contact = contact or lead.contact_person
+            phone = phone or lead.phone
+            if lead.status in (LeadStatus.NEW, LeadStatus.CONTACTED, LeadStatus.QUALIFIED):
+                lead.status = LeadStatus.VISIT_REQUIRED
+        else:
+            raise HTTPException(status_code=400, detail="Select an existing customer or lead")
     else:
         if not site_name:
             raise HTTPException(status_code=400, detail="Business / site name is required")
-        existing = None
-        if phone:
-            existing = (
-                db.query(Customer)
-                .filter(Customer.company_id == body.company_id, Customer.phone == phone)
+        if body.lead_id:
+            lead = (
+                db.query(Lead)
+                .filter(
+                    Lead.id == body.lead_id,
+                    Lead.company_id == body.company_id,
+                    Lead.organization_id == auth.organization_id,
+                )
                 .first()
             )
-        if existing:
-            customer = existing
+            if lead:
+                lead_id = lead.id
+                if lead.status in (LeadStatus.NEW, LeadStatus.CONTACTED, LeadStatus.QUALIFIED):
+                    lead.status = LeadStatus.VISIT_REQUIRED
         else:
-            customer = Customer(
+            lead = Lead(
                 organization_id=auth.organization_id,
                 company_id=body.company_id,
-                name=site_name,
+                business_name=site_name,
                 contact_person=contact,
                 phone=phone,
-                address=f"{body.lat},{body.lng}" if body.lat is not None and body.lng is not None else None,
+                location=f"{body.lat},{body.lng}" if body.lat is not None and body.lng is not None else None,
+                source="Visit",
+                notes=body.notes,
+                voice_url=body.voice_url,
+                status=LeadStatus.VISIT_REQUIRED,
+                assigned_to_id=auth.user.id,
             )
-            db.add(customer)
+            db.add(lead)
             db.flush()
-        lead = Lead(
-            organization_id=auth.organization_id,
-            company_id=body.company_id,
-            business_name=site_name,
-            contact_person=contact,
-            phone=phone,
-            location=f"{body.lat},{body.lng}" if body.lat is not None and body.lng is not None else None,
-            source="Field visit",
-            notes=body.notes,
-            voice_url=body.voice_url,
-            status=LeadStatus.VISIT_REQUIRED,
-            assigned_to_id=auth.user.id,
-            customer_id=customer.id,
-        )
-        db.add(lead)
-        db.flush()
-        lead_id = lead.id
+            lead_id = lead.id
 
     visit = FieldVisit(
         organization_id=auth.organization_id,
@@ -223,7 +185,7 @@ def create_visit(
         user_id=auth.user.id,
         lead_id=lead_id,
         customer_id=customer.id if customer else None,
-        sales_order_id=sales_order_id,
+        sales_order_id=None,
         site_name=site_name,
         contact_person=contact,
         phone=phone,
@@ -233,6 +195,11 @@ def create_visit(
         lng=_dec(body.lng),
         accuracy_m=_dec(body.accuracy_m),
         checked_in_at=datetime.now(timezone.utc),
+        purpose=purpose,
+        outcome=body.outcome,
+        next_action=body.next_action,
+        competitor_notes=body.competitor_notes,
+        issue=body.issue,
     )
     db.add(visit)
     db.flush()
@@ -254,7 +221,7 @@ def create_visit(
         organization_id=auth.organization_id,
         company_id=body.company_id,
         user_id=auth.user.id,
-        detail=f"kind={kind} customer={customer.id if customer else None} order={sales_order_id}",
+        detail=f"kind={kind} customer={customer.id if customer else None} purpose={purpose}",
     )
     db.commit()
     visit = (
