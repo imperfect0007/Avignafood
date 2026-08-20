@@ -41,15 +41,26 @@ export function todayIso() {
   return isoDate(new Date());
 }
 
-export function VehicleGlance() {
-  const [onDate, setOnDate] = useState(tomorrowIso);
+export function VehicleGlance({
+  onDate,
+  onDateChange,
+}: {
+  onDate?: string;
+  onDateChange?: (d: string) => void;
+} = {}) {
+  const [inner, setInner] = useState(todayIso);
+  const date = onDate ?? inner;
+  const setDate = (d: string) => {
+    setInner(d);
+    onDateChange?.(d);
+  };
   const [truck, setTruck] = useState<VehicleAvail | null>(null);
 
   useEffect(() => {
-    api<VehicleAvail>(`/api/v1/vehicles/availability?on_date=${onDate}`)
+    api<VehicleAvail>(`/api/v1/vehicles/availability?on_date=${date}`)
       .then(setTruck)
       .catch(() => setTruck(null));
-  }, [onDate]);
+  }, [date]);
 
   return (
     <section className="space-y-2">
@@ -58,8 +69,8 @@ export function VehicleGlance() {
         <input
           type="date"
           className="rounded-xl border border-border bg-card px-2 py-1.5 text-sm"
-          value={onDate}
-          onChange={(e) => setOnDate(e.target.value)}
+          value={date}
+          onChange={(e) => setDate(e.target.value)}
         />
       </div>
       {truck ? (
@@ -75,9 +86,9 @@ export function VehicleGlance() {
             <LivePill status={truck.live_status} />
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            {truck.live_status === "idle" && "Idle — you can promise another drop."}
-            {truck.live_status === "going" && "Going — out with goods. Don't add another now."}
-            {truck.live_status === "returning" && "Coming back empty — free once he reaches base."}
+            {truck.live_status === "idle" && "Idle. You can promise another drop."}
+            {truck.live_status === "going" && "Going. Out with goods. Do not add another now."}
+            {truck.live_status === "returning" && "Coming back empty. Free once he reaches base."}
           </p>
           <div className="mt-3 grid grid-cols-3 gap-2">
             {SLOTS.map((s) => (

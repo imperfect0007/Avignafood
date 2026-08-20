@@ -18,7 +18,6 @@ import { SupervisorDashboard } from "@/components/erp/SupervisorDashboard";
 import { SalesDashboard } from "@/components/erp/SalesDashboard";
 import { LogisticsDashboard } from "@/components/erp/LogisticsDashboard";
 import { OutstandingDelivery } from "@/components/erp/OutstandingDelivery";
-import { usePendingApprovals } from "@/components/erp/ApprovalPopup";
 import { cn } from "@/lib/utils";
 import {
   DashboardCustomizer,

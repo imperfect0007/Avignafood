@@ -17,13 +17,6 @@ from app.core.schemas import OrderDeskLine, OrderDeskOut, OutstandingDeliveryOut
 from app.inventory.routes import _default_warehouse
 
 
-def awaiting_super_admin(so: SalesOrder) -> bool:
-    """Draft sales orders wait on Super Admin / Owner — never Supervisor."""
-    status = so.status.value if hasattr(so.status, "value") else str(so.status)
-    ops = (so.ops_status or "pending_approval").strip() or "pending_approval"
-    return status == "draft" and ops in ("pending_approval", "pending_verify")
-
-
 def qty_short(ordered: Decimal, available: Decimal) -> Decimal:
     return max(Decimal("0"), Decimal(str(ordered or 0)) - Decimal(str(available or 0)))
 

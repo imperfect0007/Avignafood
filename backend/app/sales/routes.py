@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session, joinedload
 
 from app.audit.service import write_audit
-from app.core.database import engine, get_db
+from app.core.database import get_db
 from app.core.deps import AuthContext, require_owner, require_perms
 from app.core.models import (
     Customer,
@@ -33,7 +33,6 @@ from app.core.schemas import (
     SalesOrderOut,
 )
 from app.inventory.routes import _default_warehouse
-from app.sales.ensure_schema import ensure_sales_schema
 from app.sales.ops import desk_out, line_stock, on_hand, outstanding_rows, qty_short
 
 router = APIRouter(prefix="/sales-orders", tags=["sales"])
@@ -344,7 +343,7 @@ def order_desk(
     auth: AuthContext = Depends(require_perms("sales.view")),
     db: Session = Depends(get_db),
 ):
-    """Supervisor queue: invoiced orders after Accounts raises the bill. New sales orders go to Super Admin, not here."""
+    """Supervisor queue: invoiced orders after Accounts raises the bill. Super Admin approval is already done."""
     company_id = auth.require_company()
     ensure_sales_schema(engine)
     rows = (
@@ -354,7 +353,6 @@ def order_desk(
             SalesOrder.company_id == company_id,
             SalesOrder.organization_id == auth.organization_id,
             SalesOrder.status == SalesOrderStatus.INVOICED,
-            SalesOrder.ops_status.notin_(["pending_approval", "awaiting_invoice"]),
         )
         .order_by(SalesOrder.id.desc())
         .all()

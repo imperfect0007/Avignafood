@@ -38,7 +38,10 @@ def create_product(
     )
     if exists:
         raise HTTPException(status_code=400, detail="SKU already exists")
-    product = Product(organization_id=auth.organization_id, company_id=company_id, **body.model_dump())
+    data = body.model_dump()
+    if not data.get("selling_price"):
+        data["selling_price"] = data.get("base_price") or 0
+    product = Product(organization_id=auth.organization_id, company_id=company_id, **data)
     db.add(product)
     db.flush()
     write_audit(

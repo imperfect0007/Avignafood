@@ -261,8 +261,26 @@ def supervisor_dashboard(
         )
         .scalar()
     )
-    # Super Admin / Owner approve drafts. Supervisor only sees invoiced orders to verify/allot.
-    pending_approvals = 0
+    pending_quotes = (
+        db.query(func.count(Quotation.id))
+        .filter(
+            Quotation.company_id == company_id,
+            Quotation.status == QuotationStatus.PENDING_APPROVAL,
+        )
+        .scalar()
+        or 0
+    )
+    pending_order_approvals = (
+        db.query(func.count(SalesOrder.id))
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.status == SalesOrderStatus.DRAFT,
+            SalesOrder.ops_status == "pending_approval",
+        )
+        .scalar()
+        or 0
+    )
+    pending_approvals = int(pending_quotes) + int(pending_order_approvals)
     pending_orders = (
         db.query(func.count(SalesOrder.id))
         .filter(

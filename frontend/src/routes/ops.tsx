@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { api } from "@/lib/api";
 import { Badge, PageHeader, Panel } from "@/components/erp/ui-bits";
-import { SLOTS, VehicleEditor, tomorrowIso, type SlotKey, type VehicleAvail } from "@/components/erp/VehicleBoard";
+import { SLOTS, VehicleEditor, todayIso, type SlotKey, type VehicleAvail } from "@/components/erp/VehicleBoard";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/ops")({
@@ -25,6 +25,7 @@ type DeskLine = {
   unit_price: string | number;
   on_hand: string | number;
   ok: boolean;
+  outstanding_qty?: string | number;
 };
 
 type DeskOrder = {
@@ -56,7 +57,7 @@ const FILTERS: { id: Filter; label: string }[] = [
   { id: "shortage", label: "Shortage" },
   { id: "procuring", label: "Procuring" },
   { id: "ready", label: "Ready" },
-  { id: "allocated", label: "Dispatched" },
+  { id: "allocated", label: "Assigned" },
 ];
 
 function opsTone(status: string): "neutral" | "good" | "warn" | "bad" {
@@ -70,11 +71,13 @@ function opsLabel(status: string) {
   return (
     {
       pending_verify: "Verify stock",
+      awaiting_invoice: "Waiting for invoice",
+      pending_approval: "Waiting Super Admin",
       shortage: "Shortage",
       procuring: "Procuring",
-      ready: "Ready to allocate",
-      allocated: "Dispatch prepared",
-      dispatched: "Invoiced",
+      ready: "Ready to assign",
+      allocated: "Assigned to logistics",
+      dispatched: "Going",
     }[status] || status
   );
 }
@@ -89,8 +92,8 @@ function OrderDesk() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [fleet, setFleet] = useState<VehicleAvail[]>([]);
-  const [slotDate, setSlotDate] = useState(tomorrowIso());
-  const [slot, setSlot] = useState<SlotKey>("evening");
+  const [slotDate, setSlotDate] = useState(todayIso());
+  const [slot, setSlot] = useState<SlotKey>("morning");
   const [vehicleId, setVehicleId] = useState<number | "">("");
   const [maker, setMaker] = useState("");
   const [prNotes, setPrNotes] = useState("");
@@ -168,7 +171,7 @@ function OrderDesk() {
     <>
       <PageHeader
         title="Order desk"
-        subtitle="After Super Admin approves and Accounts invoices: verify stock, procure if short, then allot a driver. New sales orders do not land here."
+        subtitle="Invoiced sales orders. Confirm stock, then allot a driver. Logistics only drives what you assign."
       />
       {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
 
@@ -176,7 +179,7 @@ function OrderDesk() {
       <aside className="mb-4 lg:order-2 lg:mb-0 lg:sticky lg:top-20">
         <Panel title="Fleet windows" hint="For logistics">
           <p className="mb-3 text-xs text-muted-foreground">
-            Morning / afternoon / evening. Tap a window to mark free or booked, then allocate the order to it.
+            Morning / afternoon / evening. Assign READY orders to a window. Logistics sees them on Today.
           </p>
           <VehicleEditor date={slotDate} onDateChange={setSlotDate} onUpdated={() => void loadFleet(slotDate)} />
         </Panel>
@@ -210,7 +213,7 @@ function OrderDesk() {
       {!visible.length && (
         <Panel>
           <p className="text-sm text-muted-foreground">
-            No orders in this step. Once Sales books a deal and Super Admin approves, it lands here as confirmed.
+            No orders in this step. Accounts must raise the invoice first. Then the order lands here for you to confirm and allot a driver.
           </p>
         </Panel>
       )}
@@ -241,6 +244,7 @@ function OrderDesk() {
                     <th className="pb-2 pr-3 font-medium">Product</th>
                     <th className="pb-2 pr-3 font-medium">Need</th>
                     <th className="pb-2 pr-3 font-medium">On hand</th>
+                    <th className="pb-2 pr-3 font-medium">Outstanding</th>
                     <th className="pb-2 font-medium">Stock</th>
                   </tr>
                 </thead>
@@ -250,6 +254,7 @@ function OrderDesk() {
                       <td className="py-2 pr-3">{ln.product_name}</td>
                       <td className="py-2 pr-3 tabular-nums">{kg(ln.quantity)}</td>
                       <td className="py-2 pr-3 tabular-nums">{kg(ln.on_hand)}</td>
+                      <td className="py-2 pr-3 tabular-nums">{Number(ln.outstanding_qty) > 0 ? kg(ln.outstanding_qty) : "—"}</td>
                       <td className="py-2">
                         <Badge tone={ln.ok ? "good" : "bad"}>{ln.ok ? "Available" : "Short"}</Badge>
                       </td>
@@ -262,7 +267,7 @@ function OrderDesk() {
             {so.ops_status === "pending_verify" && (
               <div className="mt-4">
                 <p className="mb-2 text-xs text-muted-foreground">
-                  Second stock check — Sales already saw availability once. Confirm warehouse on-hand now.
+                  Second stock check — Accounts already raised the invoice. Confirm warehouse on-hand, then allot a driver.
                 </p>
                 <button
                   type="button"
@@ -277,7 +282,23 @@ function OrderDesk() {
 
             {so.ops_status === "shortage" && (
               <div className="mt-4 space-y-3 rounded-xl border border-border bg-secondary/40 p-3">
-                <p className="text-sm text-muted-foreground">No availability. Raise a purchase requirement for Super Admin approval.</p>
+                <p className="text-sm text-muted-foreground">
+                  Less stock than ordered. Remaining qty is outstanding delivery until new stock arrives. Then complete remaining, or raise a purchase.
+                </p>
+                {so.lines.some((ln) => Number(ln.outstanding_qty) > 0) && (
+                  <button
+                    type="button"
+                    disabled={busy === `fo-${so.id}` || so.lines.some((ln) => Number(ln.outstanding_qty) > 0 && Number(ln.on_hand) < Number(ln.outstanding_qty))}
+                    onClick={() =>
+                      run(`fo-${so.id}`, () =>
+                        api(`/api/v1/sales-orders/${so.id}/fulfill-outstanding`, { method: "POST" }).then(() => undefined),
+                      )
+                    }
+                    className="rounded-xl border border-border bg-card px-4 py-2.5 text-sm font-medium disabled:opacity-60"
+                  >
+                    {busy === `fo-${so.id}` ? "Completing…" : "Complete remaining"}
+                  </button>
+                )}
                 <div className="grid gap-2 sm:grid-cols-2">
                   <label className="text-xs text-muted-foreground">
                     Manufacturer
@@ -376,11 +397,11 @@ function OrderDesk() {
             {so.ops_status === "ready" && (
               <div className="mt-4 space-y-3 rounded-xl border border-border bg-secondary/40 p-3">
                 <p className="text-sm text-muted-foreground">
-                  Stock is available. Allocate to the order, prepare dispatch, and book a window for logistics (e.g. tomorrow evening if the driver is free).
+                  Stock is ready. Assign this order to a window. Logistics cannot pick it themselves.
                 </p>
                 <div className="grid gap-2 sm:grid-cols-3">
                   <label className="text-xs text-muted-foreground">
-                    Dispatch date
+                    Date
                     <input
                       type="date"
                       className="mt-1 w-full rounded-lg border border-border bg-background px-3 py-2 text-sm"
@@ -421,12 +442,13 @@ function OrderDesk() {
                 {selectedVehicle && (
                   <p className="text-xs text-muted-foreground">
                     {selectedVehicle.driver_name || "No driver listed"} · {slot} on {slotDate} is{" "}
-                    <span className={slotFree ? "text-success" : "text-destructive"}>{slotFree ? "free" : "booked"}</span>.
+                    <span className={slotFree ? "text-success" : "text-destructive"}>{slotFree ? "free" : "already assigned"}</span>
+                    {!slotFree ? " — you can still add another drop to the same window." : "."}
                   </p>
                 )}
                 <button
                   type="button"
-                  disabled={busy === `a-${so.id}` || !slotFree || !vehicleId}
+                  disabled={busy === `a-${so.id}` || !vehicleId}
                   onClick={() =>
                     run(`a-${so.id}`, () =>
                       api(`/api/v1/sales-orders/${so.id}/allocate`, {
@@ -437,17 +459,17 @@ function OrderDesk() {
                   }
                   className="rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground disabled:opacity-60"
                 >
-                  {busy === `a-${so.id}` ? "Allocating…" : "Allocate & prepare dispatch"}
+                  {busy === `a-${so.id}` ? "Assigning…" : "Assign to logistics"}
                 </button>
               </div>
             )}
 
             {(so.ops_status === "allocated" || so.ops_status === "dispatched") && (
               <p className="mt-3 text-sm text-muted-foreground">
-                Dispatch prepared
+                Assigned to logistics
                 {so.slot_date ? ` for ${so.slot_date}` : ""}
                 {so.slot ? ` ${so.slot}` : ""}
-                {so.vehicle ? ` · ${so.vehicle}` : ""}. This load is in Accounts for invoice generation.
+                {so.vehicle ? ` · ${so.vehicle}` : ""}. Driver sees it on Today → Load & go.
               </p>
             )}
           </Panel>

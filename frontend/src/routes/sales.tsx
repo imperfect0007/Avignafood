@@ -1,4 +1,4 @@
-import { createFileRoute, Link } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useCompany } from "@/lib/company-context";
@@ -60,24 +60,8 @@ function isOverdue(o: Order) {
 
 function Sales() {
   const { me } = useMe();
-  const role = me?.user.role;
-  if (role === "sales") return <SalesWorkspace />;
-  if (role === "super_admin" || role === "owner") return <OwnerApprovals />;
-  return <SupervisorOrderNote />;
-}
-
-function SupervisorOrderNote() {
-  return (
-    <>
-      <PageHeader
-        title="Sales orders"
-        subtitle="New orders go to Super Admin first. After they approve and Accounts raises the invoice, work them on Order desk."
-      />
-      <Link to="/ops" className="inline-block rounded-xl border border-primary/30 bg-primary/5 px-4 py-3 text-sm font-medium">
-        Open Order desk →
-      </Link>
-    </>
-  );
+  if (me?.user.role === "sales") return <SalesWorkspace />;
+  return <OwnerApprovals />;
 }
 
 function SalesWorkspace() {

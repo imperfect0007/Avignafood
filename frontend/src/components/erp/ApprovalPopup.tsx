@@ -103,7 +103,7 @@ export function usePendingApprovals() {
           salesperson: p.sales_order_id ? `SO-${p.sales_order_id}` : p.manufacturer || "Supervisor",
         }));
       const orderItems: PendingItem[] = orders
-        .filter((o) => o.status === "draft" && (o.ops_status === "pending_approval" || o.ops_status === "pending_verify" || !o.ops_status))
+        .filter((o) => o.status === "draft" && (o.ops_status === "pending_approval" || !o.ops_status))
         .map((o) => {
           const line = o.lines[0];
           return {
@@ -120,7 +120,23 @@ export function usePendingApprovals() {
           };
         });
       const fromApi: PendingItem[] = [...orderItems, ...quoteItems, ...purchaseItems];
-      setItems(fromApi.filter((i) => !dismissed.has(i.key)));
+
+      // Demo fallback so popup still shows with seed mock data
+      const fromMock: PendingItem[] = byFirm(approvals, firm)
+        .filter((a) => a.status === "Pending")
+        .map((a) => ({
+          key: `m-${a.id}`,
+          source: "mock" as const,
+          customer: a.customer,
+          product: a.product,
+          qty: a.qty,
+          asked: a.askedPrice,
+          floor: a.floorPrice,
+          salesperson: a.salesperson,
+        }));
+
+      const merged = (fromApi.length ? fromApi : fromMock).filter((i) => !dismissed.has(i.key));
+      setItems(merged);
     } finally {
       setLoading(false);
     }

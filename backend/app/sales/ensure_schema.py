@@ -55,24 +55,6 @@ def ensure_sales_schema(engine: Engine) -> None:
                     "WHERE COALESCE(selling_price, 0) = 0 AND COALESCE(base_price, 0) <> 0"
                 )
             )
-        if "sales_orders" in tables:
-            so_cols = {c["name"] for c in insp.get_columns("sales_orders")}
-            if "ops_status" in so_cols:
-                conn.execute(
-                    text(
-                        "ALTER TABLE sales_orders ALTER COLUMN ops_status SET DEFAULT 'pending_approval'"
-                    )
-                )
-                conn.execute(
-                    text(
-                        """
-                        UPDATE sales_orders
-                        SET ops_status = 'pending_approval'
-                        WHERE CAST(status AS TEXT) IN ('draft', 'DRAFT')
-                          AND COALESCE(ops_status, '') IN ('', 'pending_verify')
-                        """
-                    )
-                )
         if "collection_follow_ups" not in tables:
             conn.execute(
                 text(
