@@ -218,7 +218,10 @@ def supervisor_dashboard(
     auth: AuthContext = Depends(require_perms("dashboard.view")),
     db: Session = Depends(get_db),
 ):
-    """Ops + warehouse dashboard — sales team, approvals, stock, dispatch prep."""
+    """Supervisor desk: invoiced work only. New sales orders wait on Super Admin, not this dashboard."""
+    from app.sales.ensure_schema import ensure_sales_schema
+
+    ensure_sales_schema(engine)
     company_id = auth.require_company()
     today = date.today()
     month_start = today.replace(day=1)
@@ -280,7 +283,11 @@ def supervisor_dashboard(
     pending_approvals = int(pending_quotes) + int(pending_order_approvals)
     pending_orders = (
         db.query(func.count(SalesOrder.id))
-        .filter(SalesOrder.company_id == company_id, SalesOrder.status == SalesOrderStatus.DRAFT)
+        .filter(
+            SalesOrder.company_id == company_id,
+            SalesOrder.status == SalesOrderStatus.INVOICED,
+            SalesOrder.ops_status.in_(["pending_verify", "shortage", "procuring", "ready"]),
+        )
         .scalar()
     )
     confirmed_orders = (

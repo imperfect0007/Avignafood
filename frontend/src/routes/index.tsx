@@ -8,7 +8,7 @@ import {
 import { useCompany } from "@/lib/company-context";
 import { useMe } from "@/lib/me-context";
 import {
-  PERIOD_LABEL, KPI_GRAIN_LABEL, approvals, byFirm, dispatches, firms, firmName, inr, kpisByFirm,
+  PERIOD_LABEL, KPI_GRAIN_LABEL, byFirm, dispatches, firms, firmName, inr, kpisByFirm,
   kpisForGrain, monthlyRevenue, mt, revenueSeriesFor, stock,
   type DashPeriod, type FirmId, type KpiGrain,
 } from "@/lib/erp-data";
@@ -152,6 +152,7 @@ function KpiStrip({ firm, grain }: { firm: FirmId; grain: KpiGrain }) {
 
 function OwnerDashboard() {
   const { firm } = useCompany();
+  const { items: liveApprovals } = usePendingApprovals();
   const { layout, ready, toggle, remove, setSize, move, reset } = useDashboardLayout();
   const [customizeOpen, setCustomizeOpen] = useState(false);
   const [tab, setTab] = useState<"overview" | "outstanding">("overview");
@@ -178,7 +179,14 @@ function OwnerDashboard() {
     localStorage.setItem("avighna.dashboard.kpiGrain", g);
   }
 
-  const pendingApprovals = byFirm(approvals, firm).filter((a) => a.status === "Pending");
+  const pendingApprovals = liveApprovals.map((a) => ({
+    id: a.key,
+    customer: a.customer,
+    product: a.product,
+    qty: a.qty,
+    askedPrice: a.asked,
+    floorPrice: a.floor,
+  }));
 
   const series = revenueSeriesFor(firm);
   const trendData =

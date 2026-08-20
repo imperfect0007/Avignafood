@@ -220,7 +220,7 @@ def _ensure_logo_column() -> None:
     _ensure_column("vehicles", "name", "ALTER TABLE vehicles ADD COLUMN name VARCHAR(80) DEFAULT 'Truck'")
     _ensure_column("vehicles", "kind", "ALTER TABLE vehicles ADD COLUMN kind VARCHAR(40) DEFAULT 'truck'")
     _ensure_column("invoices", "dispatch_id", "ALTER TABLE invoices ADD COLUMN dispatch_id INTEGER")
-    _ensure_column("sales_orders", "ops_status", "ALTER TABLE sales_orders ADD COLUMN ops_status VARCHAR(40) DEFAULT 'pending_verify'")
+    _ensure_column("sales_orders", "ops_status", "ALTER TABLE sales_orders ADD COLUMN ops_status VARCHAR(40) DEFAULT 'pending_approval'")
     _ensure_column("purchases", "sales_order_id", "ALTER TABLE purchases ADD COLUMN sales_order_id INTEGER")
     _ensure_column("purchases", "product_id", "ALTER TABLE purchases ADD COLUMN product_id INTEGER")
     _ensure_column("dispatches", "sales_order_id", "ALTER TABLE dispatches ADD COLUMN sales_order_id INTEGER")

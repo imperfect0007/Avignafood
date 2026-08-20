@@ -135,7 +135,11 @@ function OrderDesk() {
   }, [slotDate]);
 
   const visible = useMemo(() => {
-    if (filter === "all") return rows.filter((r) => r.ops_status !== "dispatched");
+    if (filter === "all") {
+      return rows.filter(
+        (r) => !["dispatched", "pending_approval", "awaiting_invoice"].includes(r.ops_status),
+      );
+    }
     if (filter === "allocated") return rows.filter((r) => r.ops_status === "allocated" || r.ops_status === "dispatched");
     return rows.filter((r) => r.ops_status === filter);
   }, [rows, filter]);

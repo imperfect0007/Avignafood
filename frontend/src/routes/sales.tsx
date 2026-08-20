@@ -205,8 +205,8 @@ function OwnerApprovals() {
         title="Sales & price approvals"
         subtitle={
           canApprove
-            ? "Negotiated rates land here — approve or decline without leaving the page."
-            : "Negotiated rates await owner approval. You can track status here."
+            ? "Sales orders land here for Super Admin approval. After you approve, Accounts raises the invoice — Supervisor does not see the order yet."
+            : "Sales orders await Super Admin approval."
         }
         action={
           canApprove && items.length > 0 ? (
@@ -222,7 +222,7 @@ function OwnerApprovals() {
       />
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4">
-        <Kpi label="Awaiting" value={String(pending.length || items.length)} tone={pending.length || items.length ? "warn" : "good"} />
+        <Kpi label="Awaiting" value={String(items.length || pending.length)} tone={items.length || pending.length ? "warn" : "good"} />
         <Kpi
           label="Approved"
           value={String(rows.filter((r) => r.status === "Approved").length + Object.values(decisions).filter((d) => d === "Approved").length)}
@@ -230,6 +230,34 @@ function OwnerApprovals() {
         />
         <Kpi label="Pipeline value" value={inr(rows.length * 1850000)} meta="Est. from quotes" />
       </div>
+
+      {items.filter((i) => i.kind === "order" || i.kind === "quote").length > 0 && (
+        <Panel title="Waiting on Super Admin" hint="Sales created these — approve here, not on Supervisor desk" className="mt-5">
+          <ul className="space-y-3">
+            {items
+              .filter((i) => i.kind === "order" || i.kind === "quote")
+              .map((item) => (
+                <li key={item.key} className="flex items-center justify-between gap-3 rounded-xl border border-border px-3 py-2.5">
+                  <span>
+                    <span className="block font-medium">{item.customer}</span>
+                    <span className="text-sm text-muted-foreground">
+                      {item.kind === "order" ? item.salesperson : "Quote"} · {item.product} · {item.qty}
+                    </span>
+                  </span>
+                  {canApprove ? (
+                    <button
+                      type="button"
+                      onClick={() => setPopupOpen(true)}
+                      className="rounded-lg bg-primary px-3 py-1.5 text-sm font-medium text-primary-foreground"
+                    >
+                      Review
+                    </button>
+                  ) : null}
+                </li>
+              ))}
+          </ul>
+        </Panel>
+      )}
 
       <div className="mt-5 grid gap-3 sm:mt-6 sm:gap-4 lg:grid-cols-2">
         {rows

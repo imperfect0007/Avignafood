@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
-import { approvals, byFirm, inr } from "@/lib/erp-data";
-import { useCompany } from "@/lib/company-context";
+import { inr } from "@/lib/erp-data";
 import { money } from "@/lib/format";
 
 export type PendingItem = {
@@ -54,7 +53,6 @@ const canApproveRole = (role: string) => role === "super_admin" || role === "own
 
 export function usePendingApprovals() {
   const { me } = useMe();
-  const { firm } = useCompany();
   const [items, setItems] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -142,7 +140,7 @@ export function usePendingApprovals() {
     } finally {
       setLoading(false);
     }
-  }, [me, firm]);
+  }, [me]);
 
   useEffect(() => {
     refresh();

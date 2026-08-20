@@ -107,6 +107,7 @@ def list_orders(
     db: Session = Depends(get_db),
 ):
     company_id = auth.require_company()
+    ensure_sales_schema(engine)
     rows = (
         db.query(SalesOrder)
         .options(joinedload(SalesOrder.lines))
@@ -137,6 +138,7 @@ def create_order(
     db: Session = Depends(get_db),
 ):
     company_id = auth.require_company()
+    ensure_sales_schema(engine)
     lines = body.lines
     quotation = None
     if body.quotation_id:
@@ -343,6 +345,7 @@ def order_desk(
 ):
     """Supervisor queue: invoiced orders after Accounts raises the bill. Super Admin approval is already done."""
     company_id = auth.require_company()
+    ensure_sales_schema(engine)
     rows = (
         db.query(SalesOrder)
         .options(joinedload(SalesOrder.lines))
