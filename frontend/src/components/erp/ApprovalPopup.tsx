@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api } from "@/lib/api";
 import { useMe } from "@/lib/me-context";
-import { approvals, byFirm, inr } from "@/lib/erp-data";
-import { useCompany } from "@/lib/company-context";
+import { inr } from "@/lib/erp-data";
 import { money } from "@/lib/format";
 
 export type PendingItem = {
@@ -54,7 +53,6 @@ const canApproveRole = (role: string) => role === "super_admin" || role === "own
 
 export function usePendingApprovals() {
   const { me } = useMe();
-  const { firm } = useCompany();
   const [items, setItems] = useState<PendingItem[]>([]);
   const [loading, setLoading] = useState(false);
 
@@ -105,7 +103,7 @@ export function usePendingApprovals() {
           salesperson: p.sales_order_id ? `SO-${p.sales_order_id}` : p.manufacturer || "Supervisor",
         }));
       const orderItems: PendingItem[] = orders
-        .filter((o) => o.status === "draft" && (o.ops_status === "pending_approval" || !o.ops_status))
+        .filter((o) => o.status === "draft" && (o.ops_status === "pending_approval" || o.ops_status === "pending_verify" || !o.ops_status))
         .map((o) => {
           const line = o.lines[0];
           return {
@@ -122,27 +120,11 @@ export function usePendingApprovals() {
           };
         });
       const fromApi: PendingItem[] = [...orderItems, ...quoteItems, ...purchaseItems];
-
-      // Demo fallback so popup still shows with seed mock data
-      const fromMock: PendingItem[] = byFirm(approvals, firm)
-        .filter((a) => a.status === "Pending")
-        .map((a) => ({
-          key: `m-${a.id}`,
-          source: "mock" as const,
-          customer: a.customer,
-          product: a.product,
-          qty: a.qty,
-          asked: a.askedPrice,
-          floor: a.floorPrice,
-          salesperson: a.salesperson,
-        }));
-
-      const merged = (fromApi.length ? fromApi : fromMock).filter((i) => !dismissed.has(i.key));
-      setItems(merged);
+      setItems(fromApi.filter((i) => !dismissed.has(i.key)));
     } finally {
       setLoading(false);
     }
-  }, [me, firm]);
+  }, [me]);
 
   useEffect(() => {
     refresh();

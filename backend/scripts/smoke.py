@@ -99,7 +99,12 @@ def main() -> None:
 
         confirm = client.post(f"/api/v1/sales-orders/{order_id}/confirm", headers=headers)
         confirm.raise_for_status()
-        assert confirm.json()["status"] == "confirmed"
+        assert confirm.json()["ops_status"] == "pending_approval"
+        assert confirm.json()["status"] == "draft"
+
+        approve = client.post(f"/api/v1/sales-orders/{order_id}/approve", headers=headers)
+        approve.raise_for_status()
+        assert approve.json()["status"] == "confirmed"
 
         invoice = client.post(f"/api/v1/invoices/from-order/{order_id}", headers=headers)
         invoice.raise_for_status()

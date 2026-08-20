@@ -81,7 +81,6 @@ const navByRole: Record<string, NavSection[]> = {
       items: [
         { to: "/leads", label: "Leads", icon: Sparkles },
         { to: "/customers", label: "Customers", icon: Users },
-        { to: "/sales", label: "Sales & approvals", icon: Handshake },
       ],
     },
     {

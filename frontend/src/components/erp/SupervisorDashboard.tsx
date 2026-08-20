@@ -76,16 +76,12 @@ export function SupervisorDashboard() {
         <>
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Kpi
-          label="Pending orders"
+          label="To verify / allot"
           value={data ? String(data.pending_orders) : "—"}
+          meta="After Super Admin + invoice"
           tone={data && data.pending_orders > 0 ? "warn" : "good"}
         />
-        <Kpi label="Confirmed" value={data ? String(data.confirmed_orders) : "—"} />
-        <Kpi
-          label="Pending approvals"
-          value={data ? String(data.pending_approvals) : "—"}
-          tone={data && data.pending_approvals > 0 ? "warn" : "good"}
-        />
+        <Kpi label="Invoiced" value={data ? String(data.confirmed_orders) : "—"} />
         <Kpi
           label="Ready for dispatch"
           value={data ? String(data.ready_for_dispatch) : "—"}
@@ -118,12 +114,6 @@ export function SupervisorDashboard() {
               </Badge>
             </li>
             <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
-              <span>Price / quote approvals</span>
-              <Badge tone={data && data.pending_approvals > 0 ? "warn" : "good"}>
-                {data?.pending_approvals ?? 0}
-              </Badge>
-            </li>
-            <li className="flex items-center justify-between rounded-xl border border-border px-3 py-2.5">
               <span>Low stock SKUs</span>
               <Badge tone={data && data.low_stock_items > 0 ? "bad" : "good"}>
                 {data?.low_stock_items ?? 0}
@@ -151,9 +141,6 @@ export function SupervisorDashboard() {
             </Link>
             <Link to="/purchases" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
               Purchases / inward →
-            </Link>
-            <Link to="/sales" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
-              Orders & approvals →
             </Link>
             <Link to="/leads" className="rounded-xl border border-border px-4 py-3 text-sm hover:bg-secondary">
               Sales team leads →

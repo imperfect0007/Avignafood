@@ -132,7 +132,11 @@ function OrderDesk() {
   }, [slotDate]);
 
   const visible = useMemo(() => {
-    if (filter === "all") return rows.filter((r) => r.ops_status !== "dispatched");
+    if (filter === "all") {
+      return rows.filter(
+        (r) => !["dispatched", "pending_approval", "awaiting_invoice"].includes(r.ops_status),
+      );
+    }
     if (filter === "allocated") return rows.filter((r) => r.ops_status === "allocated" || r.ops_status === "dispatched");
     return rows.filter((r) => r.ops_status === filter);
   }, [rows, filter]);
@@ -164,7 +168,7 @@ function OrderDesk() {
     <>
       <PageHeader
         title="Order desk"
-        subtitle="Confirmed sales orders after Super Admin approval. Verify stock, procure if short, then allocate and book a vehicle window for logistics. Accounts invoices from dispatch."
+        subtitle="After Super Admin approves and Accounts invoices: verify stock, procure if short, then allot a driver. New sales orders do not land here."
       />
       {error && <p className="mb-3 text-sm text-destructive">{error}</p>}
 

@@ -218,7 +218,10 @@ def supervisor_dashboard(
     auth: AuthContext = Depends(require_perms("dashboard.view")),
     db: Session = Depends(get_db),
 ):
-    """Ops + warehouse dashboard — sales team, approvals, stock, dispatch prep."""
+    """Supervisor desk: invoiced work only. New sales orders wait on Super Admin, not this dashboard."""
+    from app.sales.ensure_schema import ensure_sales_schema
+
+    ensure_sales_schema(engine)
     company_id = auth.require_company()
     today = date.today()
     month_start = today.replace(day=1)
@@ -258,29 +261,15 @@ def supervisor_dashboard(
         )
         .scalar()
     )
-    pending_quotes = (
-        db.query(func.count(Quotation.id))
-        .filter(
-            Quotation.company_id == company_id,
-            Quotation.status == QuotationStatus.PENDING_APPROVAL,
-        )
-        .scalar()
-        or 0
-    )
-    pending_order_approvals = (
+    # Super Admin / Owner approve drafts. Supervisor only sees invoiced orders to verify/allot.
+    pending_approvals = 0
+    pending_orders = (
         db.query(func.count(SalesOrder.id))
         .filter(
             SalesOrder.company_id == company_id,
-            SalesOrder.status == SalesOrderStatus.DRAFT,
-            SalesOrder.ops_status == "pending_approval",
+            SalesOrder.status == SalesOrderStatus.INVOICED,
+            SalesOrder.ops_status.in_(["pending_verify", "shortage", "procuring", "ready"]),
         )
-        .scalar()
-        or 0
-    )
-    pending_approvals = int(pending_quotes) + int(pending_order_approvals)
-    pending_orders = (
-        db.query(func.count(SalesOrder.id))
-        .filter(SalesOrder.company_id == company_id, SalesOrder.status == SalesOrderStatus.DRAFT)
         .scalar()
     )
     confirmed_orders = (
